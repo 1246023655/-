@@ -1,0 +1,397 @@
+:root {
+  color: #18201d;
+  background: #f4f0e6;
+  font-family:
+    Inter, "Segoe UI", "Microsoft YaHei", system-ui, -apple-system, BlinkMacSystemFont,
+    sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  min-width: 320px;
+  min-height: 100vh;
+  margin: 0;
+}
+
+button,
+input {
+  font: inherit;
+}
+
+button {
+  min-height: 42px;
+  border: 0;
+  border-radius: 7px;
+  padding: 0 16px;
+  color: #f9f5ea;
+  background: #1f6f5a;
+  cursor: pointer;
+  transition:
+    transform 120ms ease,
+    background 120ms ease,
+    opacity 120ms ease;
+}
+
+button:hover:not(:disabled) {
+  transform: translateY(-1px);
+  background: #185845;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+button.secondary {
+  color: #1f332c;
+  background: #d8d2c2;
+}
+
+button.secondary:hover:not(:disabled) {
+  background: #c8beaa;
+}
+
+input {
+  width: 100%;
+  height: 42px;
+  border: 1px solid #cbc4b5;
+  border-radius: 7px;
+  padding: 0 12px;
+  color: #19231f;
+  background: #fffcf4;
+  outline: none;
+}
+
+input:focus {
+  border-color: #1f6f5a;
+  box-shadow: 0 0 0 3px rgb(31 111 90 / 16%);
+}
+
+.shell {
+  width: min(1180px, calc(100vw - 32px));
+  margin: 0 auto;
+  padding: 24px 0 32px;
+}
+
+.topbar {
+  display: grid;
+  grid-template-columns: minmax(180px, 260px) 1fr;
+  gap: 20px;
+  align-items: end;
+  margin-bottom: 20px;
+}
+
+.brand {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+.brand-mark {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 68% 32%, #fff 0 16%, transparent 17%),
+    #1d211f;
+  box-shadow: 15px 11px 0 #f1f0ec inset;
+}
+
+h1 {
+  margin: 0;
+  font-size: 30px;
+  line-height: 1.05;
+  font-weight: 800;
+}
+
+p {
+  margin: 0;
+}
+
+.brand p {
+  margin-top: 4px;
+  color: #617065;
+  font-size: 14px;
+}
+
+.room-tools {
+  display: grid;
+  grid-template-columns: minmax(130px, 1fr) minmax(120px, 160px) auto auto;
+  gap: 10px;
+  align-items: end;
+}
+
+label {
+  display: grid;
+  gap: 6px;
+  color: #667266;
+  font-size: 13px;
+}
+
+.game-layout {
+  display: grid;
+  grid-template-columns: 320px 1fr;
+  gap: 22px;
+  align-items: start;
+}
+
+.panel {
+  display: grid;
+  gap: 14px;
+}
+
+.status-card,
+.players,
+.share-box,
+.undo-card {
+  border: 1px solid #d8d0bd;
+  border-radius: 8px;
+  background: #fffcf4;
+  box-shadow: 0 12px 30px rgb(36 32 22 / 8%);
+}
+
+.status-card {
+  display: grid;
+  gap: 8px;
+  padding: 18px;
+}
+
+.status-card strong {
+  font-size: 20px;
+  line-height: 1.25;
+}
+
+.status-card p {
+  color: #627164;
+  line-height: 1.45;
+}
+
+.eyebrow {
+  color: #1f6f5a;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.players {
+  overflow: hidden;
+}
+
+.player-row,
+.spectator-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 70px;
+  padding: 14px 16px;
+  border-top: 1px solid #ebe4d5;
+}
+
+.player-row:first-child {
+  border-top: 0;
+}
+
+.player-row.is-turn {
+  background: #eef7f2;
+}
+
+.player-row div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.player-row strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.player-row small,
+.spectator-row span,
+.share-box span,
+.undo-card span {
+  color: #677467;
+  font-size: 13px;
+}
+
+.spectator-row {
+  justify-content: space-between;
+}
+
+.mini-stone {
+  flex: 0 0 auto;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+}
+
+.mini-stone.black {
+  background: #1c1f1d;
+  box-shadow: inset 4px 5px 8px rgb(255 255 255 / 12%);
+}
+
+.mini-stone.white {
+  border: 1px solid #cac0ab;
+  background: #fffaf0;
+  box-shadow: inset -4px -5px 8px rgb(116 92 58 / 14%);
+}
+
+.share-box {
+  display: grid;
+  gap: 8px;
+  padding: 14px;
+}
+
+.link-button {
+  width: 100%;
+  justify-content: flex-start;
+  overflow: hidden;
+  color: #17352d;
+  background: #e7f1eb;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.link-button:hover:not(:disabled) {
+  background: #d7e7de;
+}
+
+.actions,
+.undo-card div {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.undo-card {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+}
+
+.board-wrap {
+  display: grid;
+  justify-items: center;
+  min-width: 0;
+}
+
+.board {
+  --grid-color: #6f5d3d;
+  display: grid;
+  grid-template-columns: repeat(var(--board-size), 1fr);
+  width: min(100%, 78vh);
+  max-width: 780px;
+  aspect-ratio: 1;
+  padding: clamp(8px, 1.6vw, 18px);
+  border: 1px solid #a7844f;
+  border-radius: 8px;
+  background:
+    linear-gradient(var(--grid-color), var(--grid-color)) center / calc(100% - 8.6%) 1px
+      repeat-y,
+    linear-gradient(90deg, var(--grid-color), var(--grid-color)) center / 1px calc(100% - 8.6%)
+      repeat-x,
+    #dba85b;
+  box-shadow:
+    0 18px 40px rgb(48 37 18 / 20%),
+    inset 0 0 0 6px rgb(255 244 204 / 18%);
+}
+
+.cell {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 100%;
+  min-height: 0;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  padding: 0;
+  background: transparent;
+}
+
+.cell:hover:not(:disabled) {
+  background: rgb(31 111 90 / 16%);
+  transform: none;
+}
+
+.cell:disabled {
+  opacity: 1;
+}
+
+.stone {
+  display: block;
+  width: 78%;
+  aspect-ratio: 1;
+  border-radius: 50%;
+}
+
+.has-black .stone {
+  background:
+    radial-gradient(circle at 34% 28%, rgb(255 255 255 / 22%), transparent 24%),
+    #171a18;
+  box-shadow: 0 5px 9px rgb(31 24 12 / 35%);
+}
+
+.has-white .stone {
+  border: 1px solid #d0c2aa;
+  background:
+    radial-gradient(circle at 34% 28%, #fff, transparent 30%),
+    #f8efe0;
+  box-shadow: 0 5px 9px rgb(77 55 22 / 22%);
+}
+
+.cell.is-winning::after,
+.cell.is-last::after {
+  position: absolute;
+  width: 28%;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  content: "";
+}
+
+.cell.is-winning::after {
+  border: 2px solid #e94d3f;
+}
+
+.cell.is-last::after {
+  background: #e94d3f;
+}
+
+@media (max-width: 900px) {
+  .topbar,
+  .game-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .room-tools {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .board {
+    width: min(100%, 94vw);
+  }
+}
+
+@media (max-width: 560px) {
+  .shell {
+    width: min(100vw - 20px, 1180px);
+    padding-top: 14px;
+  }
+
+  .room-tools {
+    grid-template-columns: 1fr;
+  }
+
+  .actions,
+  .undo-card div {
+    grid-template-columns: 1fr;
+  }
+
+  h1 {
+    font-size: 26px;
+  }
+}
