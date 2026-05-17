@@ -267,7 +267,7 @@ io.on("connection", (socket) => {
 });
 
 if (isProduction) {
-  const distPath = join(__dirname, "..", "dist");
+  const distPath = join(__dirname, "..", "..", "dist");
   app.use(express.static(distPath));
   app.use((_, response) => {
     response.sendFile(join(distPath, "index.html"));
