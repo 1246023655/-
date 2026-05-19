@@ -1,10 +1,32 @@
 import { useEffect, useMemo, useState } from "react";
 import { io } from "socket.io-client";
+import {
+  createEmptyBoard,
+  findWinningLine,
+  isBoardFull,
+  nextTurn
+} from "./shared/gameRules";
 import { BOARD_SIZE, type Ack, type Position, type RoomState, type Stone } from "./shared/types";
 
 const socket = io();
 const CLIENT_ID_KEY = "gomoku.clientId";
 const PLAYER_NAME_KEY = "gomoku.playerName";
+type GameMode = "online" | "local" | "ai";
+
+type LocalMove = Position & {
+  color: Stone;
+  moveNumber: number;
+};
+
+type LocalGame = {
+  board: ReturnType<typeof createEmptyBoard>;
+  turn: Stone;
+  winner: Stone | null;
+  winningLine: Position[];
+  moveHistory: LocalMove[];
+  status: "playing" | "won" | "draw";
+  message: string;
+};
 
 function getClientId(): string {
   const existing = localStorage.getItem(CLIENT_ID_KEY);
@@ -22,34 +44,82 @@ function getInitialName(): string {
   return localStorage.getItem(PLAYER_NAME_KEY) || `棋手${Math.floor(Math.random() * 90 + 10)}`;
 }
 
+function createLocalGame(mode: GameMode): LocalGame {
+  return {
+    board: createEmptyBoard(),
+    turn: "black",
+    winner: null,
+    winningLine: [],
+    moveHistory: [],
+    status: "playing",
+    message: mode === "ai" ? "你执黑棋，先手。" : "轮到黑棋。"
+  };
+}
+
 export default function App() {
   const [clientId] = useState(getClientId);
   const [playerName, setPlayerName] = useState(getInitialName);
   const [roomInput, setRoomInput] = useState(() => getRoomFromUrl());
   const [state, setState] = useState<RoomState | null>(null);
+  const [mode, setMode] = useState<GameMode>(() => (getRoomFromUrl() ? "online" : "local"));
+  const [localGame, setLocalGame] = useState<LocalGame>(() => createLocalGame(getRoomFromUrl() ? "online" : "local"));
   const [notice, setNotice] = useState("");
   const [connected, setConnected] = useState(socket.connected);
   const [copied, setCopied] = useState(false);
 
+  const isOnlineMode = mode === "online";
   const myPlayer = state?.players.find((player) => player.clientId === clientId) ?? null;
   const opponent = state?.players.find((player) => player.clientId !== clientId) ?? null;
   const roleLabel = myPlayer
     ? `${stoneLabel(myPlayer.color)}玩家`
-    : state
+    : state && isOnlineMode
       ? "观战"
-      : "未入座";
-  const canMove = Boolean(myPlayer && state?.status === "playing" && state.turn === myPlayer.color);
+      : mode === "ai"
+        ? "你执黑棋"
+        : "本地双人";
+  const canMove = isOnlineMode
+    ? Boolean(myPlayer && state?.status === "playing" && state.turn === myPlayer.color)
+    : localGame.status === "playing" && (mode === "local" || localGame.turn === "black");
   const shareUrl = state
     ? `${window.location.origin}${window.location.pathname}?room=${state.roomId}`
     : "";
+  const board = isOnlineMode ? state?.board ?? createEmptyBoard() : localGame.board;
+  const currentMessage = isOnlineMode
+    ? state?.message ?? "创建或加入房间开始。"
+    : localGame.message;
+  const currentStatusLabel = isOnlineMode
+    ? state?.roomId
+      ? `房间 ${state.roomId}`
+      : "联机房间"
+    : mode === "ai"
+      ? "人机模式 · 简单"
+      : "个人模式";
   const winningSet = useMemo(() => {
-    return new Set(state?.winningLine.map((item) => `${item.row}-${item.col}`) ?? []);
-  }, [state?.winningLine]);
-  const lastMove = state?.moveHistory.at(-1);
+    const winningLine = isOnlineMode ? state?.winningLine : localGame.winningLine;
+
+    return new Set(winningLine?.map((item) => `${item.row}-${item.col}`) ?? []);
+  }, [isOnlineMode, localGame.winningLine, state?.winningLine]);
+  const lastMove = isOnlineMode ? state?.moveHistory.at(-1) : localGame.moveHistory.at(-1);
 
   useEffect(() => {
     localStorage.setItem(PLAYER_NAME_KEY, playerName);
   }, [playerName]);
+
+  useEffect(() => {
+    if (mode !== "ai" || localGame.status !== "playing" || localGame.turn !== "white") {
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      const move = chooseSimpleAiMove(localGame.board);
+
+      if (move) {
+        playLocalMove(move, "white");
+      }
+    }, 420);
+
+    return () => window.clearTimeout(timer);
+  }, [localGame.board, localGame.status, localGame.turn, mode]);
 
   useEffect(() => {
     const handleConnect = () => setConnected(true);
@@ -92,7 +162,21 @@ export default function App() {
     };
   }, []);
 
+  function changeMode(nextMode: GameMode) {
+    setMode(nextMode);
+    setNotice("");
+
+    if (nextMode === "online") {
+      return;
+    }
+
+    setState(null);
+    setLocalGame(createLocalGame(nextMode));
+    window.history.replaceState(null, "", window.location.pathname);
+  }
+
   function createRoom() {
+    setMode("online");
     setNotice("");
     socket.emit(
       "room:create",
@@ -111,6 +195,7 @@ export default function App() {
   }
 
   function joinRoom(roomId = roomInput) {
+    setMode("online");
     const normalizedRoomId = roomId.trim().toUpperCase();
 
     if (!normalizedRoomId) {
@@ -140,6 +225,11 @@ export default function App() {
       return;
     }
 
+    if (!isOnlineMode) {
+      playLocalMove(position, mode === "ai" ? "black" : localGame.turn);
+      return;
+    }
+
     socket.emit("game:move", position, (ack: Ack) => {
       if (!ack.ok) {
         setNotice(ack.error);
@@ -148,6 +238,12 @@ export default function App() {
   }
 
   function restartGame() {
+    if (!isOnlineMode) {
+      setLocalGame(createLocalGame(mode));
+      setNotice("");
+      return;
+    }
+
     socket.emit("game:restart", (ack: Ack) => {
       if (!ack.ok) {
         setNotice(ack.error);
@@ -156,6 +252,12 @@ export default function App() {
   }
 
   function requestUndo() {
+    if (!isOnlineMode) {
+      setLocalGame((current) => undoLocalMove(current, mode));
+      setNotice("");
+      return;
+    }
+
     socket.emit("game:undo:request", (ack: Ack) => {
       if (!ack.ok) {
         setNotice(ack.error);
@@ -181,6 +283,10 @@ export default function App() {
     window.setTimeout(() => setCopied(false), 1400);
   }
 
+  function playLocalMove(position: Position, color: Stone) {
+    setLocalGame((current) => applyLocalMove(current, position, color, mode));
+  }
+
   return (
     <main className="shell">
       <section className="topbar" aria-label="房间操作">
@@ -188,11 +294,34 @@ export default function App() {
           <span className="brand-mark" aria-hidden="true" />
           <div>
             <h1>五子棋</h1>
-            <p>{connected ? "已连接" : "连接中"}</p>
+            <p>{isOnlineMode ? (connected ? "联机已连接" : "联机连接中") : "本地对局"}</p>
           </div>
         </div>
 
         <div className="room-tools">
+          <div className="mode-tabs" aria-label="模式选择">
+            <button
+              type="button"
+              className={mode === "online" ? "is-selected" : "secondary"}
+              onClick={() => changeMode("online")}
+            >
+              联机
+            </button>
+            <button
+              type="button"
+              className={mode === "local" ? "is-selected" : "secondary"}
+              onClick={() => changeMode("local")}
+            >
+              个人
+            </button>
+            <button
+              type="button"
+              className={mode === "ai" ? "is-selected" : "secondary"}
+              onClick={() => changeMode("ai")}
+            >
+              人机
+            </button>
+          </div>
           <label>
             昵称
             <input
@@ -206,6 +335,7 @@ export default function App() {
             <input
               value={roomInput}
               maxLength={8}
+              disabled={!isOnlineMode}
               onChange={(event) => setRoomInput(event.target.value.toUpperCase())}
               onKeyDown={(event) => {
                 if (event.key === "Enter") {
@@ -226,21 +356,36 @@ export default function App() {
       <section className="game-layout">
         <aside className="panel" aria-label="对局状态">
           <div className="status-card">
-            <span className="eyebrow">{state?.roomId ? `房间 ${state.roomId}` : "未加入房间"}</span>
-            <strong>{state?.message ?? "创建或加入房间开始。"}</strong>
+            <span className="eyebrow">{currentStatusLabel}</span>
+            <strong>{currentMessage}</strong>
             <p>{notice || `你的身份：${roleLabel}`}</p>
           </div>
 
-          <div className="players">
-            <PlayerRow color="black" state={state} clientId={clientId} />
-            <PlayerRow color="white" state={state} clientId={clientId} />
-            <div className="spectator-row">
-              <span>观战</span>
-              <strong>{state?.spectators ?? 0}</strong>
+          {isOnlineMode ? (
+            <div className="players">
+              <PlayerRow color="black" state={state} clientId={clientId} />
+              <PlayerRow color="white" state={state} clientId={clientId} />
+              <div className="spectator-row">
+                <span>观战</span>
+                <strong>{state?.spectators ?? 0}</strong>
+              </div>
             </div>
-          </div>
+          ) : (
+            <div className="players">
+              <LocalPlayerRow
+                color="black"
+                name={mode === "ai" ? "你" : "黑棋"}
+                isTurn={localGame.status === "playing" && localGame.turn === "black"}
+              />
+              <LocalPlayerRow
+                color="white"
+                name={mode === "ai" ? "简单电脑" : "白棋"}
+                isTurn={localGame.status === "playing" && localGame.turn === "white"}
+              />
+            </div>
+          )}
 
-          {state && (
+          {state && isOnlineMode && (
             <div className="share-box">
               <span>分享链接</span>
               <button type="button" className="link-button" onClick={copyShareUrl}>
@@ -250,14 +395,18 @@ export default function App() {
           )}
 
           <div className="actions">
-            <button type="button" onClick={restartGame} disabled={!myPlayer || !state}>
+            <button type="button" onClick={restartGame} disabled={isOnlineMode && (!myPlayer || !state)}>
               重开
             </button>
             <button
               type="button"
               className="secondary"
               onClick={requestUndo}
-              disabled={!myPlayer || !state || state.moveHistory.length === 0 || state.status !== "playing"}
+              disabled={
+                isOnlineMode
+                  ? !myPlayer || !state || state.moveHistory.length === 0 || state.status !== "playing"
+                  : localGame.moveHistory.length === 0 || localGame.status !== "playing"
+              }
             >
               悔棋
             </button>
@@ -285,7 +434,7 @@ export default function App() {
           >
             {Array.from({ length: BOARD_SIZE }).map((_, row) =>
               Array.from({ length: BOARD_SIZE }).map((__, col) => {
-                const stone = state?.board[row][col] ?? null;
+                const stone = board[row][col] ?? null;
                 const key = `${row}-${col}`;
                 const isLastMove = lastMove?.row === row && lastMove.col === col;
 
@@ -343,6 +492,149 @@ function PlayerRow({
       </div>
     </div>
   );
+}
+
+function LocalPlayerRow({
+  color,
+  name,
+  isTurn
+}: {
+  color: Stone;
+  name: string;
+  isTurn: boolean;
+}) {
+  return (
+    <div className={`player-row ${isTurn ? "is-turn" : ""}`}>
+      <span className={`mini-stone ${color}`} />
+      <div>
+        <strong>{name}</strong>
+        <small>{stoneLabel(color)}</small>
+      </div>
+    </div>
+  );
+}
+
+function applyLocalMove(
+  game: LocalGame,
+  position: Position,
+  color: Stone,
+  mode: GameMode
+): LocalGame {
+  if (game.status !== "playing" || game.board[position.row]?.[position.col] || color !== game.turn) {
+    return game;
+  }
+
+  const board = game.board.map((row) => [...row]);
+  board[position.row][position.col] = color;
+
+  const winningLine = findWinningLine(board, position, color);
+  const moveHistory = [
+    ...game.moveHistory,
+    { ...position, color, moveNumber: game.moveHistory.length + 1 }
+  ];
+
+  if (winningLine.length) {
+    return {
+      ...game,
+      board,
+      winner: color,
+      winningLine,
+      moveHistory,
+      status: "won",
+      message: `${stoneLabel(color)}获胜。`
+    };
+  }
+
+  if (isBoardFull(board)) {
+    return {
+      ...game,
+      board,
+      moveHistory,
+      status: "draw",
+      message: "棋盘已满，平局。"
+    };
+  }
+
+  const turn = nextTurn(color);
+
+  return {
+    ...game,
+    board,
+    turn,
+    moveHistory,
+    message: getLocalMessage(mode, turn)
+  };
+}
+
+function undoLocalMove(game: LocalGame, mode: GameMode): LocalGame {
+  const undoCount = mode === "ai" ? 2 : 1;
+  const nextHistory = game.moveHistory.slice(0, Math.max(0, game.moveHistory.length - undoCount));
+  const nextGame = createLocalGame(mode);
+
+  return nextHistory.reduce(
+    (current, move) => applyLocalMove(current, move, move.color, mode),
+    nextGame
+  );
+}
+
+function chooseSimpleAiMove(board: LocalGame["board"]): Position | null {
+  const available = getAvailablePositions(board);
+
+  if (!available.length) {
+    return null;
+  }
+
+  return (
+    findTacticalMove(board, available, "white") ??
+    findTacticalMove(board, available, "black") ??
+    getCenterMove(board) ??
+    available[Math.floor(Math.random() * available.length)]
+  );
+}
+
+function findTacticalMove(
+  board: LocalGame["board"],
+  available: Position[],
+  color: Stone
+): Position | null {
+  for (const move of available) {
+    const nextBoard = board.map((row) => [...row]);
+    nextBoard[move.row][move.col] = color;
+
+    if (findWinningLine(nextBoard, move, color).length) {
+      return move;
+    }
+  }
+
+  return null;
+}
+
+function getCenterMove(board: LocalGame["board"]): Position | null {
+  const center = Math.floor(BOARD_SIZE / 2);
+
+  return board[center][center] ? null : { row: center, col: center };
+}
+
+function getAvailablePositions(board: LocalGame["board"]): Position[] {
+  const positions: Position[] = [];
+
+  for (let row = 0; row < BOARD_SIZE; row += 1) {
+    for (let col = 0; col < BOARD_SIZE; col += 1) {
+      if (!board[row][col]) {
+        positions.push({ row, col });
+      }
+    }
+  }
+
+  return positions;
+}
+
+function getLocalMessage(mode: GameMode, turn: Stone): string {
+  if (mode === "ai") {
+    return turn === "black" ? "轮到你落子。" : "电脑思考中。";
+  }
+
+  return `轮到${stoneLabel(turn)}。`;
 }
 
 function getRoomFromUrl(): string {
