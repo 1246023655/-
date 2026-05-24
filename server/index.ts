@@ -13,6 +13,7 @@ import {
 import {
   type Ack,
   type Board,
+  type ColorSwapRequest,
   type CreateRoomPayload,
   type GameStatus,
   type JoinPayload,
@@ -47,6 +48,7 @@ type Room = {
   moveHistory: Move[];
   status: GameStatus;
   undoRequest: UndoRequest | null;
+  colorSwapRequest: ColorSwapRequest | null;
   lastEvent: RoomEvent | null;
   eventCounter: number;
 };
@@ -190,6 +192,171 @@ io.on("connection", (socket) => {
     reply?.({ ok: true });
   });
 
+  socket.on("player:choose-color", (color: Stone, reply?: (ack: Ack) => void) => {
+    const room = getSocketRoom(socket);
+    const clientId = socket.data.clientId;
+
+    if (!room || !clientId) {
+      reply?.({ ok: false, error: "请先加入房间。" });
+      return;
+    }
+
+    if (room.status !== "waiting" || room.moveHistory.length > 0) {
+      reply?.({ ok: false, error: "开局后不能换颜色。" });
+      return;
+    }
+
+    const player = room.players.find((item) => item.clientId === clientId);
+    const targetPlayer = room.players.find((item) => item.color === color);
+
+    if (!player) {
+      reply?.({ ok: false, error: "观战者不能选择颜色。" });
+      return;
+    }
+
+    if (player.color === color) {
+      reply?.({ ok: true });
+      return;
+    }
+
+    if (targetPlayer) {
+      reply?.({ ok: false, error: `${color === "black" ? "黑棋" : "白棋"}已经有人选择，可以发起换棋申请。` });
+      return;
+    }
+
+    player.color = color;
+    player.ready = false;
+    room.colorSwapRequest = null;
+    setRoomEvent(room, `${player.name} 选择了${color === "black" ? "黑棋" : "白棋"}，请双方准备。`, "info");
+    refreshRoomStatus(room);
+    broadcastRoom(room);
+    reply?.({ ok: true });
+  });
+
+  socket.on("player:ready", (reply?: (ack: Ack) => void) => {
+    const room = getSocketRoom(socket);
+    const clientId = socket.data.clientId;
+
+    if (!room || !clientId) {
+      reply?.({ ok: false, error: "请先加入房间。" });
+      return;
+    }
+
+    const player = room.players.find((item) => item.clientId === clientId);
+
+    if (!player) {
+      reply?.({ ok: false, error: "观战者不能准备。" });
+      return;
+    }
+
+    if (room.status === "playing") {
+      reply?.({ ok: false, error: "对局已经开始。" });
+      return;
+    }
+
+    player.ready = !player.ready;
+    const shouldStart =
+      player.ready &&
+      room.players.length === 2 &&
+      room.players.every((item) => item.online && item.ready);
+    refreshRoomStatus(room);
+
+    if (shouldStart) {
+      setRoomEvent(room, "游戏开始", "success", "game-start");
+    } else {
+      setRoomEvent(room, `${player.name} ${player.ready ? "已准备" : "取消准备"}。`, "info");
+    }
+
+    broadcastRoom(room);
+    reply?.({ ok: true });
+  });
+
+  socket.on("color-swap:request", (requestedColor: Stone, reply?: (ack: Ack) => void) => {
+    const room = getSocketRoom(socket);
+    const clientId = socket.data.clientId;
+
+    if (!room || !clientId) {
+      reply?.({ ok: false, error: "请先加入房间。" });
+      return;
+    }
+
+    if (room.status !== "waiting" || room.moveHistory.length > 0) {
+      reply?.({ ok: false, error: "开局后不能申请换棋。" });
+      return;
+    }
+
+    const requester = room.players.find((item) => item.clientId === clientId);
+    const target = room.players.find((item) => item.color === requestedColor);
+
+    if (!requester || !target || target.clientId === requester.clientId) {
+      reply?.({ ok: false, error: "当前不能申请这个颜色。" });
+      return;
+    }
+
+    room.colorSwapRequest = {
+      id: room.eventCounter + 1,
+      fromClientId: requester.clientId,
+      toClientId: target.clientId,
+      requestedColor,
+      fromName: requester.name
+    };
+    setAllPlayersUnready(room);
+    setRoomEvent(
+      room,
+      `${requester.name} 申请换成${requestedColor === "black" ? "黑棋" : "白棋"}。`,
+      "warning",
+      "swap-request"
+    );
+    refreshRoomStatus(room);
+    broadcastRoom(room);
+    reply?.({ ok: true });
+  });
+
+  socket.on("color-swap:respond", (accepted: boolean, reply?: (ack: Ack) => void) => {
+    const room = getSocketRoom(socket);
+    const clientId = socket.data.clientId;
+
+    if (!room || !clientId || !room.colorSwapRequest) {
+      reply?.({ ok: false, error: "没有可处理的换棋申请。" });
+      return;
+    }
+
+    const request = room.colorSwapRequest;
+
+    if (request.toClientId !== clientId) {
+      reply?.({ ok: false, error: "只有被申请的玩家可以处理。" });
+      return;
+    }
+
+    const requester = room.players.find((item) => item.clientId === request.fromClientId);
+    const target = room.players.find((item) => item.clientId === request.toClientId);
+
+    if (!requester || !target) {
+      room.colorSwapRequest = null;
+      reply?.({ ok: false, error: "申请已失效。" });
+      return;
+    }
+
+    if (accepted) {
+      const oldColor = requester.color;
+      requester.color = request.requestedColor;
+      target.color = oldColor;
+      setAllPlayersUnready(room);
+      setRoomEvent(
+        room,
+        `${target.name} 同意换棋，${requester.name} 现在执${request.requestedColor === "black" ? "黑棋" : "白棋"}。`,
+        "success"
+      );
+    } else {
+      setRoomEvent(room, `${target.name} 拒绝了换棋申请。`, "warning");
+    }
+
+    room.colorSwapRequest = null;
+    refreshRoomStatus(room);
+    broadcastRoom(room);
+    reply?.({ ok: true });
+  });
+
   socket.on("game:restart", (reply?: (ack: Ack) => void) => {
     const room = getSocketRoom(socket);
 
@@ -200,7 +367,7 @@ io.on("connection", (socket) => {
 
     resetRoom(room);
     refreshRoomStatus(room);
-    setRoomEvent(room, "对局已重开，黑棋先手。", "info");
+    setRoomEvent(room, "对局已重开，请双方重新准备。", "info");
     broadcastRoom(room);
     reply?.({ ok: true });
   });
@@ -268,7 +435,9 @@ io.on("connection", (socket) => {
 
     if (player) {
       player.online = false;
+      player.ready = false;
       player.socketId = null;
+      room.colorSwapRequest = null;
       setRoomEvent(room, `${player.name} 已离线，对局暂停。`, "warning");
     } else {
       const spectator = room.spectators.get(socket.data.clientId);
@@ -320,6 +489,7 @@ function createRoom(): Room {
     moveHistory: [],
     status: "waiting",
     undoRequest: null,
+    colorSwapRequest: null,
     lastEvent: null,
     eventCounter: 0
   };
@@ -394,6 +564,7 @@ function addOrReconnectParticipant(
       name,
       color,
       online: true,
+      ready: false,
       socketId: socket.id
     });
     return { action: "joined-player", color, name };
@@ -424,6 +595,8 @@ function resetRoom(room: Room): void {
   room.moveHistory = [];
   room.status = "waiting";
   room.undoRequest = null;
+  room.colorSwapRequest = null;
+  setAllPlayersUnready(room);
 }
 
 function undoLastMove(room: Room): void {
@@ -442,6 +615,12 @@ function undoLastMove(room: Room): void {
   room.undoRequest = null;
 }
 
+function setAllPlayersUnready(room: Room): void {
+  room.players.forEach((player) => {
+    player.ready = false;
+  });
+}
+
 function refreshRoomStatus(room: Room): void {
   if (room.status === "won" || room.status === "draw") {
     return;
@@ -457,7 +636,7 @@ function refreshRoomStatus(room: Room): void {
     return;
   }
 
-  room.status = "playing";
+  room.status = room.players.every((player) => player.ready) ? "playing" : "waiting";
 }
 
 function serializeRoom(room: Room): RoomState {
@@ -472,6 +651,7 @@ function serializeRoom(room: Room): RoomState {
     moveHistory: room.moveHistory,
     status: room.status,
     undoRequest: room.undoRequest,
+    colorSwapRequest: room.colorSwapRequest,
     lastEvent: room.lastEvent,
     message: getRoomMessage(room)
   };
@@ -479,6 +659,11 @@ function serializeRoom(room: Room): RoomState {
 
 function getRoomMessage(room: Room): string {
   if (room.status === "waiting") {
+    if (room.players.length === 2) {
+      const readyCount = room.players.filter((player) => player.ready).length;
+      return `等待双方准备：${readyCount}/2。`;
+    }
+
     return "等待第二位玩家加入。";
   }
 
@@ -531,11 +716,17 @@ function announceParticipantChange(
   setRoomEvent(room, `${change.name} 已重新进入观战。`, "info");
 }
 
-function setRoomEvent(room: Room, message: string, type: RoomEvent["type"]): void {
+function setRoomEvent(
+  room: Room,
+  message: string,
+  type: RoomEvent["type"],
+  code?: RoomEvent["code"]
+): void {
   room.eventCounter += 1;
   room.lastEvent = {
     id: room.eventCounter,
     message,
-    type
+    type,
+    code
   };
 }

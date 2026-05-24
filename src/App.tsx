@@ -85,6 +85,7 @@ export default function App() {
   const [connected, setConnected] = useState(socket.connected);
   const [copied, setCopied] = useState(false);
   const lastRoomEventIdRef = useRef(0);
+  const boardSectionRef = useRef<HTMLElement | null>(null);
 
   const isOnlineMode = mode === "online";
   const myPlayer = state?.players.find((player) => player.clientId === clientId) ?? null;
@@ -99,6 +100,7 @@ export default function App() {
   const canMove = isOnlineMode
     ? Boolean(myPlayer && state?.status === "playing" && state.turn === myPlayer.color)
     : localGame.status === "playing" && (mode === "local" || localGame.turn === "black");
+  const isPlayingView = isOnlineMode ? state?.status === "playing" : localGame.status === "playing";
   const shareUrl = state
     ? `${window.location.origin}${window.location.pathname}?room=${state.roomId}`
     : "";
@@ -119,6 +121,14 @@ export default function App() {
     return new Set(winningLine?.map((item) => `${item.row}-${item.col}`) ?? []);
   }, [isOnlineMode, localGame.winningLine, state?.winningLine]);
   const lastMove = isOnlineMode ? state?.moveHistory.at(-1) : localGame.moveHistory.at(-1);
+  const canUsePreparation =
+    isOnlineMode &&
+    Boolean(myPlayer && state?.status === "waiting" && state.moveHistory.length === 0);
+  const occupiedBlack = state?.players.find((player) => player.color === "black") ?? null;
+  const occupiedWhite = state?.players.find((player) => player.color === "white") ?? null;
+  const colorSwapRequestForMe =
+    state?.colorSwapRequest?.toClientId === clientId ? state.colorSwapRequest : null;
+  const colorSwapRequestedByMe = state?.colorSwapRequest?.fromClientId === clientId;
 
   useEffect(() => {
     localStorage.setItem(PLAYER_NAME_KEY, playerName);
@@ -150,6 +160,12 @@ export default function App() {
       if (nextState.lastEvent && nextState.lastEvent.id !== lastRoomEventIdRef.current) {
         lastRoomEventIdRef.current = nextState.lastEvent.id;
         setEventNotice(nextState.lastEvent.message);
+        if (nextState.lastEvent.code === "game-start") {
+          window.setTimeout(() => {
+            boardSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+          }, 80);
+          window.setTimeout(() => window.alert("游戏开始"), 260);
+        }
       }
       window.history.replaceState(null, "", `?room=${nextState.roomId}`);
     };
@@ -306,6 +322,38 @@ export default function App() {
     });
   }
 
+  function chooseOnlineColor(color: Stone) {
+    socket.emit("player:choose-color", color, (ack: Ack) => {
+      if (!ack.ok) {
+        setNotice(ack.error);
+      }
+    });
+  }
+
+  function toggleReady() {
+    socket.emit("player:ready", (ack: Ack) => {
+      if (!ack.ok) {
+        setNotice(ack.error);
+      }
+    });
+  }
+
+  function requestColorSwap(color: Stone) {
+    socket.emit("color-swap:request", color, (ack: Ack) => {
+      if (!ack.ok) {
+        setNotice(ack.error);
+      }
+    });
+  }
+
+  function respondColorSwap(accepted: boolean) {
+    socket.emit("color-swap:respond", accepted, (ack: Ack) => {
+      if (!ack.ok) {
+        setNotice(ack.error);
+      }
+    });
+  }
+
   async function copyShareUrl() {
     if (!shareUrl) {
       return;
@@ -321,7 +369,7 @@ export default function App() {
   }
 
   return (
-    <main className="shell">
+    <main className={`shell ${isPlayingView ? "is-playing" : ""}`}>
       <section className="topbar" aria-label="房间操作">
         <div className="brand">
           <span className="brand-mark" aria-hidden="true" />
@@ -437,6 +485,78 @@ export default function App() {
             </div>
           )}
 
+          {state && isOnlineMode && myPlayer && (
+            <div className="prepare-card">
+              <span className="eyebrow">准备阶段</span>
+              <div className="color-actions" aria-label="选择棋色">
+                <button
+                  type="button"
+                  className={myPlayer.color === "black" ? "is-selected" : "secondary"}
+                  disabled={
+                    !canUsePreparation ||
+                    myPlayer.color === "black" ||
+                    Boolean(occupiedBlack && occupiedBlack.clientId !== clientId)
+                  }
+                  onClick={() => chooseOnlineColor("black")}
+                >
+                  执黑
+                </button>
+                <button
+                  type="button"
+                  className={myPlayer.color === "white" ? "is-selected" : "secondary"}
+                  disabled={
+                    !canUsePreparation ||
+                    myPlayer.color === "white" ||
+                    Boolean(occupiedWhite && occupiedWhite.clientId !== clientId)
+                  }
+                  onClick={() => chooseOnlineColor("white")}
+                >
+                  执白
+                </button>
+              </div>
+              <button
+                type="button"
+                disabled={!canUsePreparation || Boolean(state.colorSwapRequest)}
+                onClick={toggleReady}
+              >
+                {myPlayer.ready ? "取消准备" : "准备"}
+              </button>
+              {canUsePreparation &&
+                occupiedBlack &&
+                occupiedBlack.clientId !== clientId &&
+                myPlayer.color !== "black" && (
+                  <button
+                    type="button"
+                    className="secondary"
+                    disabled={colorSwapRequestedByMe}
+                    onClick={() => requestColorSwap("black")}
+                  >
+                    {colorSwapRequestedByMe ? "已申请换黑棋" : "申请换黑棋"}
+                  </button>
+                )}
+              {colorSwapRequestForMe && (
+                <div className="swap-request">
+                  <span>
+                    {colorSwapRequestForMe.fromName} 申请换成
+                    {stoneLabel(colorSwapRequestForMe.requestedColor)}
+                  </span>
+                  <div className="swap-actions">
+                    <button type="button" onClick={() => respondColorSwap(true)}>
+                      同意
+                    </button>
+                    <button
+                      type="button"
+                      className="secondary"
+                      onClick={() => respondColorSwap(false)}
+                    >
+                      拒绝
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
           {state && isOnlineMode && (
             <div className="share-box">
               <span>分享链接</span>
@@ -479,7 +599,7 @@ export default function App() {
           )}
         </aside>
 
-        <section className="board-wrap" aria-label="棋盘">
+        <section className="board-wrap" aria-label="棋盘" ref={boardSectionRef}>
           <div className="board-frame">
             <div className={`board ${canMove ? "is-active" : ""}`}>
               {COORDINATE_LABELS.map((label, index) => (
@@ -584,6 +704,7 @@ function PlayerRow({
           {stoneLabel(color)}
           {isMe ? " · 你" : ""}
           {player && !player.online ? " · 离线" : ""}
+          {player ? (player.ready ? " · 已准备" : " · 未准备") : ""}
         </small>
       </div>
     </div>

@@ -14,6 +14,7 @@ export type PlayerInfo = {
   name: string;
   color: Stone;
   online: boolean;
+  ready: boolean;
 };
 
 export type Move = Position & {
@@ -33,6 +34,15 @@ export type RoomEvent = {
   id: number;
   message: string;
   type: "info" | "success" | "warning";
+  code?: "game-start" | "swap-request";
+};
+
+export type ColorSwapRequest = {
+  id: number;
+  fromClientId: string;
+  toClientId: string;
+  requestedColor: Stone;
+  fromName: string;
 };
 
 export type GameStatus =
@@ -53,6 +63,7 @@ export type RoomState = {
   moveHistory: Move[];
   status: GameStatus;
   undoRequest: UndoRequest | null;
+  colorSwapRequest: ColorSwapRequest | null;
   lastEvent: RoomEvent | null;
   message: string;
 };
