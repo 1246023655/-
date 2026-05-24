@@ -11,6 +11,20 @@ import { BOARD_SIZE, type Ack, type Position, type RoomState, type Stone } from 
 const socket = io();
 const CLIENT_ID_KEY = "gomoku.clientId";
 const PLAYER_NAME_KEY = "gomoku.playerName";
+const BOARD_EDGE_PERCENT = 3.4;
+const BOARD_SPAN_PERCENT = 93.2;
+const COORDINATE_LABELS = "ABCDEFGHIJKLMNO".split("");
+const STAR_POINTS: Position[] = [
+  { row: 3, col: 3 },
+  { row: 3, col: 7 },
+  { row: 3, col: 11 },
+  { row: 7, col: 3 },
+  { row: 7, col: 7 },
+  { row: 7, col: 11 },
+  { row: 11, col: 3 },
+  { row: 11, col: 7 },
+  { row: 11, col: 11 }
+];
 type GameMode = "online" | "local" | "ai";
 
 type LocalMove = Position & {
@@ -428,37 +442,81 @@ export default function App() {
         </aside>
 
         <section className="board-wrap" aria-label="棋盘">
-          <div
-            className={`board ${canMove ? "is-active" : ""}`}
-            style={{ "--board-size": BOARD_SIZE } as React.CSSProperties}
-          >
-            {Array.from({ length: BOARD_SIZE }).map((_, row) =>
-              Array.from({ length: BOARD_SIZE }).map((__, col) => {
-                const stone = board[row][col] ?? null;
-                const key = `${row}-${col}`;
-                const isLastMove = lastMove?.row === row && lastMove.col === col;
+          <div className="board-frame">
+            <div className={`board ${canMove ? "is-active" : ""}`}>
+              {COORDINATE_LABELS.map((label, index) => (
+                <span
+                  className="coord-label coord-label-top"
+                  key={`top-${label}`}
+                  style={boardCoordinateStyle("top", index)}
+                >
+                  {label}
+                </span>
+              ))}
+              {COORDINATE_LABELS.map((label, index) => (
+                <span
+                  className="coord-label coord-label-bottom"
+                  key={`bottom-${label}`}
+                  style={boardCoordinateStyle("bottom", index)}
+                >
+                  {label}
+                </span>
+              ))}
+              {Array.from({ length: BOARD_SIZE }).map((_, index) => (
+                <span
+                  className="coord-label coord-label-left"
+                  key={`left-${index}`}
+                  style={boardCoordinateStyle("left", index)}
+                >
+                  {BOARD_SIZE - index}
+                </span>
+              ))}
+              {Array.from({ length: BOARD_SIZE }).map((_, index) => (
+                <span
+                  className="coord-label coord-label-right"
+                  key={`right-${index}`}
+                  style={boardCoordinateStyle("right", index)}
+                >
+                  {BOARD_SIZE - index}
+                </span>
+              ))}
+              {STAR_POINTS.map((point) => (
+                <span
+                  aria-hidden="true"
+                  className="star-point"
+                  key={`star-${point.row}-${point.col}`}
+                  style={boardPointStyle(point.row, point.col)}
+                />
+              ))}
+              {Array.from({ length: BOARD_SIZE }).map((_, row) =>
+                Array.from({ length: BOARD_SIZE }).map((__, col) => {
+                  const stone = board[row][col] ?? null;
+                  const key = `${row}-${col}`;
+                  const isLastMove = lastMove?.row === row && lastMove.col === col;
 
-                return (
-                  <button
-                    type="button"
-                    key={key}
-                    className={[
-                      "cell",
-                      stone ? `has-${stone}` : "",
-                      winningSet.has(key) ? "is-winning" : "",
-                      isLastMove ? "is-last" : ""
-                    ]
-                      .filter(Boolean)
-                      .join(" ")}
-                    aria-label={`${row + 1}行${col + 1}列${stone ? stoneLabel(stone) : "空位"}`}
-                    disabled={!canMove || Boolean(stone)}
-                    onClick={() => makeMove({ row, col })}
-                  >
-                    {stone && <span className="stone" />}
-                  </button>
-                );
-              })
-            )}
+                  return (
+                    <button
+                      type="button"
+                      key={key}
+                      style={boardPointStyle(row, col)}
+                      className={[
+                        "cell",
+                        stone ? `has-${stone}` : "",
+                        winningSet.has(key) ? "is-winning" : "",
+                        isLastMove ? "is-last" : ""
+                      ]
+                        .filter(Boolean)
+                        .join(" ")}
+                      aria-label={`${row + 1}行${col + 1}列${stone ? stoneLabel(stone) : "空位"}`}
+                      disabled={!canMove || Boolean(stone)}
+                      onClick={() => makeMove({ row, col })}
+                    >
+                      {stone && <span className="stone" />}
+                    </button>
+                  );
+                })
+              )}
+            </div>
           </div>
         </section>
       </section>
@@ -635,6 +693,38 @@ function getLocalMessage(mode: GameMode, turn: Stone): string {
   }
 
   return `轮到${stoneLabel(turn)}。`;
+}
+
+function boardPointStyle(row: number, col: number): React.CSSProperties {
+  return {
+    left: `${boardAxisPercent(col)}%`,
+    top: `${boardAxisPercent(row)}%`
+  };
+}
+
+function boardCoordinateStyle(
+  side: "top" | "bottom" | "left" | "right",
+  index: number
+): React.CSSProperties {
+  const position = `${boardAxisPercent(index)}%`;
+
+  if (side === "top") {
+    return { left: position, top: "1.6%" };
+  }
+
+  if (side === "bottom") {
+    return { left: position, top: "98.4%" };
+  }
+
+  if (side === "left") {
+    return { left: "1.6%", top: position };
+  }
+
+  return { left: "98.4%", top: position };
+}
+
+function boardAxisPercent(index: number): number {
+  return BOARD_EDGE_PERCENT + (index * BOARD_SPAN_PERCENT) / (BOARD_SIZE - 1);
 }
 
 function getRoomFromUrl(): string {
