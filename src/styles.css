@@ -1,8 +1,8 @@
 :root {
-  color: #261f18;
+  color: #f9f3ff;
   background:
-    linear-gradient(180deg, #f3eadb, #e7d4b7),
-    #ead8bd;
+    linear-gradient(180deg, #1c4775 0%, #4d66a4 34%, #c18ab3 68%, #f4cba5 100%),
+    #203f6a;
   font-family:
     Inter, "Segoe UI", "Microsoft YaHei", system-ui, -apple-system, BlinkMacSystemFont,
     sans-serif;
@@ -18,7 +18,12 @@ body {
   min-width: 320px;
   min-height: 100vh;
   margin: 0;
-  background: linear-gradient(180deg, #f2e7d7, #dec49e);
+  background:
+    radial-gradient(circle at 50% 75%, rgb(255 186 139 / 36%) 0 8%, transparent 25%),
+    radial-gradient(circle at 18% 68%, rgb(255 219 194 / 18%) 0 6%, transparent 18%),
+    radial-gradient(circle at 78% 24%, rgb(99 170 221 / 20%) 0 7%, transparent 22%),
+    linear-gradient(180deg, #183d69 0%, #315f96 34%, #806eb0 58%, #d99eb0 78%, #f4d2a8 100%);
+  background-attachment: fixed;
 }
 
 button,
@@ -33,7 +38,7 @@ button {
   padding: 0 16px;
   color: #fff9ef;
   background: #6e4726;
-  box-shadow: 0 7px 16px rgb(69 43 18 / 18%);
+  box-shadow: 0 7px 16px rgb(29 22 50 / 22%);
   cursor: pointer;
   transition:
     transform 120ms ease,
@@ -55,7 +60,7 @@ button.secondary {
   color: #3a2818;
   background: #f7ead7;
   border: 1px solid #caa678;
-  box-shadow: 0 6px 14px rgb(77 51 24 / 10%);
+  box-shadow: 0 6px 14px rgb(31 28 55 / 14%);
 }
 
 button.secondary:hover:not(:disabled) {
@@ -128,7 +133,7 @@ p {
 
 .brand p {
   margin-top: 4px;
-  color: #70573d;
+  color: #efe7ff;
   font-size: 14px;
 }
 
@@ -142,7 +147,7 @@ p {
 label {
   display: grid;
   gap: 6px;
-  color: #6c553d;
+  color: #f8ecff;
   font-size: 13px;
 }
 
@@ -162,12 +167,13 @@ label {
 .players,
 .share-box,
 .undo-card {
-  border: 1px solid #d1b087;
+  border: 1px solid rgb(255 232 211 / 58%);
   border-radius: 8px;
-  background: rgb(255 249 238 / 88%);
+  background: rgb(255 249 238 / 82%);
   box-shadow:
-    0 14px 30px rgb(79 51 20 / 12%),
+    0 14px 30px rgb(23 20 48 / 22%),
     inset 0 0 0 1px rgb(255 255 255 / 54%);
+  backdrop-filter: blur(8px);
 }
 
 .status-card {
