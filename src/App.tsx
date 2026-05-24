@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { io } from "socket.io-client";
 import {
   createEmptyBoard,
   findWinningLine,
+  isInsideBoard,
   isBoardFull,
   nextTurn
 } from "./shared/gameRules";
@@ -26,6 +27,7 @@ const STAR_POINTS: Position[] = [
   { row: 11, col: 11 }
 ];
 type GameMode = "online" | "local" | "ai";
+type AiLevel = "one" | "two";
 
 type LocalMove = Position & {
   color: Stone;
@@ -58,7 +60,7 @@ function getInitialName(): string {
   return localStorage.getItem(PLAYER_NAME_KEY) || `棋手${Math.floor(Math.random() * 90 + 10)}`;
 }
 
-function createLocalGame(mode: GameMode): LocalGame {
+function createLocalGame(mode: GameMode, aiLevel: AiLevel = "one"): LocalGame {
   return {
     board: createEmptyBoard(),
     turn: "black",
@@ -66,7 +68,7 @@ function createLocalGame(mode: GameMode): LocalGame {
     winningLine: [],
     moveHistory: [],
     status: "playing",
-    message: mode === "ai" ? "你执黑棋，先手。" : "轮到黑棋。"
+    message: mode === "ai" ? `你执黑棋，当前电脑为${aiLevelLabel(aiLevel)}。` : "轮到黑棋。"
   };
 }
 
@@ -77,9 +79,12 @@ export default function App() {
   const [state, setState] = useState<RoomState | null>(null);
   const [mode, setMode] = useState<GameMode>(() => (getRoomFromUrl() ? "online" : "local"));
   const [localGame, setLocalGame] = useState<LocalGame>(() => createLocalGame(getRoomFromUrl() ? "online" : "local"));
+  const [aiLevel, setAiLevel] = useState<AiLevel>("one");
   const [notice, setNotice] = useState("");
+  const [eventNotice, setEventNotice] = useState("");
   const [connected, setConnected] = useState(socket.connected);
   const [copied, setCopied] = useState(false);
+  const lastRoomEventIdRef = useRef(0);
 
   const isOnlineMode = mode === "online";
   const myPlayer = state?.players.find((player) => player.clientId === clientId) ?? null;
@@ -106,7 +111,7 @@ export default function App() {
       ? `房间 ${state.roomId}`
       : "联机房间"
     : mode === "ai"
-      ? "人机模式 · 简单"
+      ? `人机模式 · ${aiLevelLabel(aiLevel)}`
       : "个人模式";
   const winningSet = useMemo(() => {
     const winningLine = isOnlineMode ? state?.winningLine : localGame.winningLine;
@@ -125,7 +130,7 @@ export default function App() {
     }
 
     const timer = window.setTimeout(() => {
-      const move = chooseSimpleAiMove(localGame.board);
+      const move = chooseAiMove(localGame.board, aiLevel);
 
       if (move) {
         playLocalMove(move, "white");
@@ -133,7 +138,7 @@ export default function App() {
     }, 420);
 
     return () => window.clearTimeout(timer);
-  }, [localGame.board, localGame.status, localGame.turn, mode]);
+  }, [aiLevel, localGame.board, localGame.status, localGame.turn, mode]);
 
   useEffect(() => {
     const handleConnect = () => setConnected(true);
@@ -142,6 +147,10 @@ export default function App() {
       setState(nextState);
       setRoomInput(nextState.roomId);
       setNotice("");
+      if (nextState.lastEvent && nextState.lastEvent.id !== lastRoomEventIdRef.current) {
+        lastRoomEventIdRef.current = nextState.lastEvent.id;
+        setEventNotice(nextState.lastEvent.message);
+      }
       window.history.replaceState(null, "", `?room=${nextState.roomId}`);
     };
 
@@ -179,14 +188,24 @@ export default function App() {
   function changeMode(nextMode: GameMode) {
     setMode(nextMode);
     setNotice("");
+    setEventNotice("");
 
     if (nextMode === "online") {
       return;
     }
 
     setState(null);
-    setLocalGame(createLocalGame(nextMode));
+    setLocalGame(createLocalGame(nextMode, aiLevel));
     window.history.replaceState(null, "", window.location.pathname);
+  }
+
+  function changeAiLevel(nextLevel: AiLevel) {
+    setAiLevel(nextLevel);
+
+    if (mode === "ai") {
+      setLocalGame(createLocalGame("ai", nextLevel));
+      setNotice("");
+    }
   }
 
   function createRoom() {
@@ -253,7 +272,7 @@ export default function App() {
 
   function restartGame() {
     if (!isOnlineMode) {
-      setLocalGame(createLocalGame(mode));
+      setLocalGame(createLocalGame(mode, aiLevel));
       setNotice("");
       return;
     }
@@ -267,7 +286,7 @@ export default function App() {
 
   function requestUndo() {
     if (!isOnlineMode) {
-      setLocalGame((current) => undoLocalMove(current, mode));
+      setLocalGame((current) => undoLocalMove(current, mode, aiLevel));
       setNotice("");
       return;
     }
@@ -336,6 +355,24 @@ export default function App() {
               人机
             </button>
           </div>
+          {mode === "ai" && (
+            <div className="ai-tabs" aria-label="人机难度">
+              <button
+                type="button"
+                className={aiLevel === "one" ? "is-selected" : "secondary"}
+                onClick={() => changeAiLevel("one")}
+              >
+                一段
+              </button>
+              <button
+                type="button"
+                className={aiLevel === "two" ? "is-selected" : "secondary"}
+                onClick={() => changeAiLevel("two")}
+              >
+                二段
+              </button>
+            </div>
+          )}
           <label>
             昵称
             <input
@@ -372,6 +409,7 @@ export default function App() {
           <div className="status-card">
             <span className="eyebrow">{currentStatusLabel}</span>
             <strong>{currentMessage}</strong>
+            {isOnlineMode && eventNotice && <span className="event-notice">{eventNotice}</span>}
             <p>{notice || `你的身份：${roleLabel}`}</p>
           </div>
 
@@ -393,7 +431,7 @@ export default function App() {
               />
               <LocalPlayerRow
                 color="white"
-                name={mode === "ai" ? "简单电脑" : "白棋"}
+                name={mode === "ai" ? `${aiLevelLabel(aiLevel)}电脑` : "白棋"}
                 isTurn={localGame.status === "playing" && localGame.turn === "white"}
               />
             </div>
@@ -624,10 +662,10 @@ function applyLocalMove(
   };
 }
 
-function undoLocalMove(game: LocalGame, mode: GameMode): LocalGame {
+function undoLocalMove(game: LocalGame, mode: GameMode, aiLevel: AiLevel): LocalGame {
   const undoCount = mode === "ai" ? 2 : 1;
   const nextHistory = game.moveHistory.slice(0, Math.max(0, game.moveHistory.length - undoCount));
-  const nextGame = createLocalGame(mode);
+  const nextGame = createLocalGame(mode, aiLevel);
 
   return nextHistory.reduce(
     (current, move) => applyLocalMove(current, move, move.color, mode),
@@ -635,11 +673,15 @@ function undoLocalMove(game: LocalGame, mode: GameMode): LocalGame {
   );
 }
 
-function chooseSimpleAiMove(board: LocalGame["board"]): Position | null {
+function chooseAiMove(board: LocalGame["board"], level: AiLevel): Position | null {
   const available = getAvailablePositions(board);
 
   if (!available.length) {
     return null;
+  }
+
+  if (level === "two") {
+    return chooseMediumAiMove(board, available);
   }
 
   return (
@@ -648,6 +690,113 @@ function chooseSimpleAiMove(board: LocalGame["board"]): Position | null {
     getCenterMove(board) ??
     available[Math.floor(Math.random() * available.length)]
   );
+}
+
+function chooseMediumAiMove(board: LocalGame["board"], available: Position[]): Position {
+  const immediateMove =
+    findTacticalMove(board, available, "white") ?? findTacticalMove(board, available, "black");
+
+  if (immediateMove) {
+    return immediateMove;
+  }
+
+  let bestScore = -Infinity;
+  let bestMoves: Position[] = [];
+
+  for (const move of available) {
+    const score =
+      evaluateCandidate(board, move, "white") * 1.1 +
+      evaluateCandidate(board, move, "black") * 0.95 +
+      centerBias(move) +
+      neighborBias(board, move);
+
+    if (score > bestScore) {
+      bestScore = score;
+      bestMoves = [move];
+    } else if (score === bestScore) {
+      bestMoves.push(move);
+    }
+  }
+
+  return bestMoves[Math.floor(Math.random() * bestMoves.length)];
+}
+
+function evaluateCandidate(board: LocalGame["board"], move: Position, color: Stone): number {
+  const nextBoard = board.map((row) => [...row]);
+  nextBoard[move.row][move.col] = color;
+  const directions: Position[] = [
+    { row: 0, col: 1 },
+    { row: 1, col: 0 },
+    { row: 1, col: 1 },
+    { row: 1, col: -1 }
+  ];
+
+  return directions.reduce((total, direction) => {
+    const forward = countLine(nextBoard, move, color, direction);
+    const backward = countLine(nextBoard, move, color, {
+      row: -direction.row,
+      col: -direction.col
+    });
+    const length = forward.count + backward.count + 1;
+    const openEnds = Number(forward.open) + Number(backward.open);
+
+    return total + scoreShape(length, openEnds);
+  }, 0);
+}
+
+function countLine(
+  board: LocalGame["board"],
+  origin: Position,
+  color: Stone,
+  direction: Position
+): { count: number; open: boolean } {
+  let count = 0;
+  let row = origin.row + direction.row;
+  let col = origin.col + direction.col;
+
+  while (isInsideBoard(row, col) && board[row][col] === color) {
+    count += 1;
+    row += direction.row;
+    col += direction.col;
+  }
+
+  return {
+    count,
+    open: isInsideBoard(row, col) && !board[row][col]
+  };
+}
+
+function scoreShape(length: number, openEnds: number): number {
+  if (length >= 5) return 100000;
+  if (length === 4 && openEnds === 2) return 18000;
+  if (length === 4 && openEnds === 1) return 5200;
+  if (length === 3 && openEnds === 2) return 1600;
+  if (length === 3 && openEnds === 1) return 420;
+  if (length === 2 && openEnds === 2) return 140;
+  if (length === 2 && openEnds === 1) return 45;
+  if (length === 1 && openEnds === 2) return 12;
+  return 2;
+}
+
+function centerBias(move: Position): number {
+  const center = Math.floor(BOARD_SIZE / 2);
+  const distance = Math.abs(move.row - center) + Math.abs(move.col - center);
+
+  return Math.max(0, 18 - distance * 2);
+}
+
+function neighborBias(board: LocalGame["board"], move: Position): number {
+  let score = 0;
+
+  for (let row = move.row - 2; row <= move.row + 2; row += 1) {
+    for (let col = move.col - 2; col <= move.col + 2; col += 1) {
+      if (isInsideBoard(row, col) && board[row][col]) {
+        score += 8 - Math.min(6, Math.abs(row - move.row) + Math.abs(col - move.col));
+      }
+    }
+  }
+
+  return score;
 }
 
 function findTacticalMove(
@@ -693,6 +842,10 @@ function getLocalMessage(mode: GameMode, turn: Stone): string {
   }
 
   return `轮到${stoneLabel(turn)}。`;
+}
+
+function aiLevelLabel(level: AiLevel): string {
+  return level === "one" ? "一段" : "二段";
 }
 
 function boardPointStyle(row: number, col: number): React.CSSProperties {

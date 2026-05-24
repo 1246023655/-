@@ -19,6 +19,7 @@ import {
   type Move,
   type MovePayload,
   type PlayerInfo,
+  type RoomEvent,
   type RoomState,
   type Stone,
   type UndoRequest
@@ -46,6 +47,14 @@ type Room = {
   moveHistory: Move[];
   status: GameStatus;
   undoRequest: UndoRequest | null;
+  lastEvent: RoomEvent | null;
+  eventCounter: number;
+};
+
+type ParticipantChange = {
+  action: "joined-player" | "joined-spectator" | "reconnected-player" | "reconnected-spectator";
+  color?: Stone;
+  name: string;
 };
 
 type SocketData = {
@@ -83,6 +92,7 @@ io.on("connection", (socket) => {
     rooms.set(room.roomId, room);
     joinSocketRoom(socket, room.roomId, checked.clientId);
     addOrReconnectParticipant(room, socket, checked.clientId, checked.name);
+    setRoomEvent(room, `${checked.name} 创建了房间，等待好友加入。`, "info");
     broadcastRoom(room);
     reply?.({ ok: true, roomId: room.roomId, state: serializeRoom(room) });
   });
@@ -103,8 +113,10 @@ io.on("connection", (socket) => {
     }
 
     joinSocketRoom(socket, room.roomId, checked.clientId);
-    addOrReconnectParticipant(room, socket, checked.clientId, checked.name);
+    const beforeStatus = room.status;
+    const change = addOrReconnectParticipant(room, socket, checked.clientId, checked.name);
     refreshRoomStatus(room);
+    announceParticipantChange(room, change, beforeStatus);
     broadcastRoom(room);
     reply?.({ ok: true, state: serializeRoom(room) });
   });
@@ -166,8 +178,10 @@ io.on("connection", (socket) => {
       room.winner = player.color;
       room.winningLine = winningLine;
       room.status = "won";
+      setRoomEvent(room, `${player.name} 连成五子，${player.color === "black" ? "黑棋" : "白棋"}获胜。`, "success");
     } else if (isBoardFull(room.board)) {
       room.status = "draw";
+      setRoomEvent(room, "棋盘已满，本局平局。", "info");
     } else {
       room.turn = nextTurn(room.turn);
     }
@@ -186,6 +200,7 @@ io.on("connection", (socket) => {
 
     resetRoom(room);
     refreshRoomStatus(room);
+    setRoomEvent(room, "对局已重开，黑棋先手。", "info");
     broadcastRoom(room);
     reply?.({ ok: true });
   });
@@ -232,8 +247,10 @@ io.on("connection", (socket) => {
 
     if (accepted) {
       undoLastMove(room);
+      setRoomEvent(room, "对手同意悔棋，已回退上一步。", "info");
     } else {
       room.undoRequest = null;
+      setRoomEvent(room, "对手拒绝了悔棋请求。", "warning");
     }
 
     broadcastRoom(room);
@@ -252,6 +269,7 @@ io.on("connection", (socket) => {
     if (player) {
       player.online = false;
       player.socketId = null;
+      setRoomEvent(room, `${player.name} 已离线，对局暂停。`, "warning");
     } else {
       const spectator = room.spectators.get(socket.data.clientId);
 
@@ -301,7 +319,9 @@ function createRoom(): Room {
     winningLine: [],
     moveHistory: [],
     status: "waiting",
-    undoRequest: null
+    undoRequest: null,
+    lastEvent: null,
+    eventCounter: 0
   };
 }
 
@@ -348,14 +368,14 @@ function addOrReconnectParticipant(
   socket: Socket,
   clientId: string,
   name: string
-): void {
+): ParticipantChange {
   const existingPlayer = room.players.find((player) => player.clientId === clientId);
 
   if (existingPlayer) {
     existingPlayer.name = name;
     existingPlayer.online = true;
     existingPlayer.socketId = socket.id;
-    return;
+    return { action: "reconnected-player", color: existingPlayer.color, name };
   }
 
   const existingSpectator = room.spectators.get(clientId);
@@ -364,18 +384,19 @@ function addOrReconnectParticipant(
     existingSpectator.name = name;
     existingSpectator.online = true;
     existingSpectator.socketId = socket.id;
-    return;
+    return { action: "reconnected-spectator", name };
   }
 
   if (room.players.length < 2) {
+    const color = room.players.some((player) => player.color === "black") ? "white" : "black";
     room.players.push({
       clientId,
       name,
-      color: room.players.some((player) => player.color === "black") ? "white" : "black",
+      color,
       online: true,
       socketId: socket.id
     });
-    return;
+    return { action: "joined-player", color, name };
   }
 
   room.spectators.set(clientId, {
@@ -384,6 +405,7 @@ function addOrReconnectParticipant(
     socketId: socket.id,
     online: true
   });
+  return { action: "joined-spectator", name };
 }
 
 function getSocketRoom(socket: Socket): Room | undefined {
@@ -450,6 +472,7 @@ function serializeRoom(room: Room): RoomState {
     moveHistory: room.moveHistory,
     status: room.status,
     undoRequest: room.undoRequest,
+    lastEvent: room.lastEvent,
     message: getRoomMessage(room)
   };
 }
@@ -476,4 +499,43 @@ function getRoomMessage(room: Room): string {
 
 function broadcastRoom(room: Room): void {
   io.to(room.roomId).emit("game:state", serializeRoom(room));
+}
+
+function announceParticipantChange(
+  room: Room,
+  change: ParticipantChange,
+  beforeStatus: GameStatus
+): void {
+  if (change.action === "joined-player") {
+    const colorLabel = change.color === "black" ? "黑棋" : "白棋";
+
+    if (room.status === "playing" && beforeStatus !== "playing") {
+      setRoomEvent(room, `${change.name} 已加入成为${colorLabel}，对局开始，黑棋先手。`, "success");
+      return;
+    }
+
+    setRoomEvent(room, `${change.name} 已加入成为${colorLabel}。`, "info");
+    return;
+  }
+
+  if (change.action === "joined-spectator") {
+    setRoomEvent(room, `${change.name} 进入房间观战。`, "info");
+    return;
+  }
+
+  if (change.action === "reconnected-player") {
+    setRoomEvent(room, `${change.name} 已重新连接。`, room.status === "playing" ? "success" : "info");
+    return;
+  }
+
+  setRoomEvent(room, `${change.name} 已重新进入观战。`, "info");
+}
+
+function setRoomEvent(room: Room, message: string, type: RoomEvent["type"]): void {
+  room.eventCounter += 1;
+  room.lastEvent = {
+    id: room.eventCounter,
+    message,
+    type
+  };
 }

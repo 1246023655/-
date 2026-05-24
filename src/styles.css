@@ -193,6 +193,17 @@ label {
   line-height: 1.45;
 }
 
+.event-notice {
+  display: block;
+  border-left: 3px solid #8a5528;
+  border-radius: 6px;
+  padding: 8px 10px;
+  color: #342317;
+  background: rgb(248 234 211 / 82%);
+  font-size: 14px;
+  line-height: 1.4;
+}
+
 .eyebrow {
   color: #8a5528;
   font-size: 13px;
@@ -493,10 +504,18 @@ label {
   transform: translate(-50%, -50%);
 }
 
-.mode-tabs {
+.mode-tabs,
+.ai-tabs {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
   gap: 6px;
+}
+
+.mode-tabs {
+  grid-template-columns: repeat(3, 1fr);
+}
+
+.ai-tabs {
+  grid-template-columns: repeat(2, 1fr);
 }
 
 @keyframes winning-pop {

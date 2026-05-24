@@ -29,6 +29,12 @@ export type UndoRequest = {
   moveNumber: number;
 };
 
+export type RoomEvent = {
+  id: number;
+  message: string;
+  type: "info" | "success" | "warning";
+};
+
 export type GameStatus =
   | "waiting"
   | "playing"
@@ -47,6 +53,7 @@ export type RoomState = {
   moveHistory: Move[];
   status: GameStatus;
   undoRequest: UndoRequest | null;
+  lastEvent: RoomEvent | null;
   message: string;
 };
 
