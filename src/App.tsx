@@ -7,6 +7,7 @@ import {
   isBoardFull,
   nextTurn
 } from "./shared/gameRules";
+import { gomokuAudio } from "./audio";
 import { BOARD_SIZE, type Ack, type Position, type RoomState, type Stone } from "./shared/types";
 
 const socket = io();
@@ -84,8 +85,12 @@ export default function App() {
   const [eventNotice, setEventNotice] = useState("");
   const [connected, setConnected] = useState(socket.connected);
   const [copied, setCopied] = useState(false);
+  const [musicEnabled, setMusicEnabled] = useState(() => gomokuAudio.isEnabled());
   const lastRoomEventIdRef = useRef(0);
   const boardSectionRef = useRef<HTMLElement | null>(null);
+  const prepareCardRef = useRef<HTMLDivElement | null>(null);
+  const onlineMoveCountRef = useRef<number | null>(null);
+  const localMoveCountRef = useRef(0);
 
   const isOnlineMode = mode === "online";
   const myPlayer = state?.players.find((player) => player.clientId === clientId) ?? null;
@@ -133,6 +138,52 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem(PLAYER_NAME_KEY, playerName);
   }, [playerName]);
+
+  useEffect(() => {
+    void gomokuAudio.startMusic().catch(() => undefined);
+
+    const unlockAudio = () => {
+      void gomokuAudio.unlock().catch(() => undefined);
+    };
+
+    window.addEventListener("pointerdown", unlockAudio, { once: true });
+    window.addEventListener("keydown", unlockAudio, { once: true });
+
+    return () => {
+      window.removeEventListener("pointerdown", unlockAudio);
+      window.removeEventListener("keydown", unlockAudio);
+    };
+  }, []);
+
+  useEffect(() => {
+    const moveCount = state?.moveHistory.length ?? 0;
+
+    if (!isOnlineMode || !state) {
+      onlineMoveCountRef.current = null;
+      return;
+    }
+
+    if (onlineMoveCountRef.current === null) {
+      onlineMoveCountRef.current = moveCount;
+      return;
+    }
+
+    if (moveCount > onlineMoveCountRef.current) {
+      gomokuAudio.playMove();
+    }
+
+    onlineMoveCountRef.current = moveCount;
+  }, [isOnlineMode, state?.moveHistory.length]);
+
+  useEffect(() => {
+    const moveCount = localGame.moveHistory.length;
+
+    if (moveCount > localMoveCountRef.current) {
+      gomokuAudio.playMove();
+    }
+
+    localMoveCountRef.current = moveCount;
+  }, [localGame.moveHistory.length]);
 
   useEffect(() => {
     if (mode !== "ai" || localGame.status !== "playing" || localGame.turn !== "white") {
@@ -225,6 +276,7 @@ export default function App() {
   }
 
   function createRoom() {
+    void gomokuAudio.unlock().catch(() => undefined);
     setMode("online");
     setNotice("");
     socket.emit(
@@ -244,6 +296,7 @@ export default function App() {
   }
 
   function joinRoom(roomId = roomInput) {
+    void gomokuAudio.unlock().catch(() => undefined);
     setMode("online");
     const normalizedRoomId = roomId.trim().toUpperCase();
 
@@ -262,14 +315,14 @@ export default function App() {
           return;
         }
 
-        setState(ack.state);
-        setRoomInput(ack.state.roomId);
-        window.history.replaceState(null, "", `?room=${ack.state.roomId}`);
+        handleJoinedRoom(ack.state);
       }
     );
   }
 
   function makeMove(position: Position) {
+    void gomokuAudio.unlock().catch(() => undefined);
+
     if (!canMove) {
       return;
     }
@@ -354,6 +407,39 @@ export default function App() {
     });
   }
 
+  function handleJoinedRoom(nextState: RoomState) {
+    setState(nextState);
+    setRoomInput(nextState.roomId);
+    window.history.replaceState(null, "", `?room=${nextState.roomId}`);
+    window.setTimeout(() => {
+      prepareCardRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 80);
+
+    const joinedPlayer = nextState.players.find((player) => player.clientId === clientId);
+    const canAutoReady =
+      joinedPlayer &&
+      nextState.status === "waiting" &&
+      nextState.moveHistory.length === 0 &&
+      !joinedPlayer.ready &&
+      !nextState.colorSwapRequest;
+
+    if (canAutoReady) {
+      window.setTimeout(() => {
+        socket.emit("player:ready", (ack: Ack) => {
+          if (!ack.ok) {
+            setNotice(ack.error);
+          }
+        });
+      }, 160);
+    }
+  }
+
+  function toggleMusic() {
+    const nextEnabled = !musicEnabled;
+    setMusicEnabled(nextEnabled);
+    gomokuAudio.setEnabled(nextEnabled);
+  }
+
   async function copyShareUrl() {
     if (!shareUrl) {
       return;
@@ -377,6 +463,9 @@ export default function App() {
             <h1>五子棋</h1>
             <p>{isOnlineMode ? (connected ? "联机已连接" : "联机连接中") : "本地对局"}</p>
           </div>
+          <button type="button" className="audio-toggle" onClick={toggleMusic}>
+            {musicEnabled ? "音乐开" : "音乐关"}
+          </button>
         </div>
 
         <div className="room-tools">
@@ -486,7 +575,7 @@ export default function App() {
           )}
 
           {state && isOnlineMode && myPlayer && (
-            <div className="prepare-card">
+            <div className="prepare-card" ref={prepareCardRef}>
               <span className="eyebrow">准备阶段</span>
               <div className="color-actions" aria-label="选择棋色">
                 <button

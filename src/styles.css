@@ -145,6 +145,21 @@ input:focus {
   align-items: center;
 }
 
+.audio-toggle {
+  min-height: 34px;
+  margin-left: auto;
+  padding: 0 12px;
+  border: 1px solid rgb(255 232 211 / 48%);
+  color: #fff8eb;
+  background: rgb(36 26 20 / 42%);
+  box-shadow: 0 6px 14px rgb(19 20 45 / 14%);
+  white-space: nowrap;
+}
+
+.audio-toggle:hover:not(:disabled) {
+  background: rgb(36 26 20 / 62%);
+}
+
 .brand-mark {
   width: 40px;
   height: 40px;
