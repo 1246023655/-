@@ -34,7 +34,7 @@ export type RoomEvent = {
   id: number;
   message: string;
   type: "info" | "success" | "warning";
-  code?: "game-start" | "swap-request" | "rematch-request";
+  code?: "game-start" | "swap-request" | "rematch-request" | "restart-request";
 };
 
 export type ColorSwapRequest = {
@@ -46,6 +46,11 @@ export type ColorSwapRequest = {
 };
 
 export type RematchRequest = {
+  byClientId: string;
+  byName: string;
+};
+
+export type RestartRequest = {
   byClientId: string;
   byName: string;
 };
@@ -70,6 +75,7 @@ export type RoomState = {
   undoRequest: UndoRequest | null;
   colorSwapRequest: ColorSwapRequest | null;
   rematchRequest: RematchRequest | null;
+  restartRequest: RestartRequest | null;
   lastEvent: RoomEvent | null;
   message: string;
 };

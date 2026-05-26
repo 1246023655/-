@@ -136,6 +136,11 @@ export default function App() {
   const colorSwapRequestForMe =
     state?.colorSwapRequest?.toClientId === clientId ? state.colorSwapRequest : null;
   const colorSwapRequestedByMe = state?.colorSwapRequest?.fromClientId === clientId;
+  const restartRequestForMe =
+    state?.restartRequest && state.restartRequest.byClientId !== clientId
+      ? state.restartRequest
+      : null;
+  const restartRequestedByMe = state?.restartRequest?.byClientId === clientId;
   const gameOverKey = getGameOverKey(state);
   const rematchRequestForMe =
     state?.rematchRequest && state.rematchRequest.byClientId !== clientId
@@ -374,6 +379,14 @@ export default function App() {
     }
 
     socket.emit("game:restart", (ack: Ack) => {
+      if (!ack.ok) {
+        setNotice(ack.error);
+      }
+    });
+  }
+
+  function respondRestart(accepted: boolean) {
+    socket.emit("game:restart:respond", accepted, (ack: Ack) => {
       if (!ack.ok) {
         setNotice(ack.error);
       }
@@ -738,8 +751,12 @@ export default function App() {
           )}
 
           <div className="actions">
-            <button type="button" onClick={restartGame} disabled={isOnlineMode && (!myPlayer || !state)}>
-              重开
+            <button
+              type="button"
+              onClick={restartGame}
+              disabled={isOnlineMode && (!myPlayer || !state || Boolean(state.restartRequest))}
+            >
+              {isOnlineMode && restartRequestedByMe ? "已申请重开" : "重开"}
             </button>
             <button
               type="button"
@@ -754,6 +771,26 @@ export default function App() {
               悔棋
             </button>
           </div>
+
+          {state?.restartRequest && myPlayer && restartRequestForMe && (
+            <div className="undo-card">
+              <span>对方申请重开</span>
+              <div>
+                <button type="button" onClick={() => respondRestart(true)}>
+                  是
+                </button>
+                <button type="button" className="secondary" onClick={() => respondRestart(false)}>
+                  否
+                </button>
+              </div>
+            </div>
+          )}
+
+          {state?.restartRequest && myPlayer && restartRequestedByMe && (
+            <div className="undo-card">
+              <span>已申请重开，等待对方选择。</span>
+            </div>
+          )}
 
           {state?.undoRequest && myPlayer && state.undoRequest.byClientId !== clientId && (
             <div className="undo-card">

@@ -21,6 +21,7 @@ import {
   type MovePayload,
   type PlayerInfo,
   type RematchRequest,
+  type RestartRequest,
   type RoomEvent,
   type RoomState,
   type Stone,
@@ -51,6 +52,7 @@ type Room = {
   undoRequest: UndoRequest | null;
   colorSwapRequest: ColorSwapRequest | null;
   rematchRequest: RematchRequest | null;
+  restartRequest: RestartRequest | null;
   lastEvent: RoomEvent | null;
   eventCounter: number;
 };
@@ -175,6 +177,7 @@ io.on("connection", (socket) => {
 
     room.moveHistory.push(move);
     room.undoRequest = null;
+    room.restartRequest = null;
 
     const winningLine = findWinningLine(room.board, { row, col }, player.color);
 
@@ -183,11 +186,13 @@ io.on("connection", (socket) => {
       room.winningLine = winningLine;
       room.status = "won";
       room.rematchRequest = null;
+      room.restartRequest = null;
       setAllPlayersUnready(room);
       setRoomEvent(room, `${player.name} 连成五子，${player.color === "black" ? "黑棋" : "白棋"}获胜。`, "success");
     } else if (isBoardFull(room.board)) {
       room.status = "draw";
       room.rematchRequest = null;
+      room.restartRequest = null;
       setAllPlayersUnready(room);
       setRoomEvent(room, "棋盘已满，本局平局。", "info");
     } else {
@@ -473,15 +478,82 @@ io.on("connection", (socket) => {
 
   socket.on("game:restart", (reply?: (ack: Ack) => void) => {
     const room = getSocketRoom(socket);
+    const clientId = socket.data.clientId;
 
-    if (!room || !isSocketPlayer(room, socket)) {
+    if (!room || !clientId || !isSocketPlayer(room, socket)) {
       reply?.({ ok: false, error: "只有玩家可以重开。" });
+      return;
+    }
+
+    const player = room.players.find((item) => item.clientId === clientId);
+
+    if (!player) {
+      reply?.({ ok: false, error: "没有找到玩家。" });
+      return;
+    }
+
+    if (canRequestRestart(room)) {
+      if (room.restartRequest) {
+        if (room.restartRequest.byClientId === clientId) {
+          reply?.({ ok: true });
+          return;
+        }
+
+        resetRoom(room);
+        refreshRoomStatus(room);
+        setRoomEvent(room, `${player.name} 同意重开，对局已重开，请双方重新准备。`, "info");
+        broadcastRoom(room);
+        reply?.({ ok: true });
+        return;
+      }
+
+      room.restartRequest = {
+        byClientId: player.clientId,
+        byName: player.name
+      };
+      setRoomEvent(room, `${player.name} 申请重开。`, "warning", "restart-request");
+      broadcastRoom(room);
+      reply?.({ ok: true });
       return;
     }
 
     resetRoom(room);
     refreshRoomStatus(room);
     setRoomEvent(room, "对局已重开，请双方重新准备。", "info");
+    broadcastRoom(room);
+    reply?.({ ok: true });
+  });
+
+  socket.on("game:restart:respond", (accepted: boolean, reply?: (ack: Ack) => void) => {
+    const room = getSocketRoom(socket);
+    const clientId = socket.data.clientId;
+
+    if (!room || !clientId || !isSocketPlayer(room, socket) || !room.restartRequest) {
+      reply?.({ ok: false, error: "没有可处理的重开申请。" });
+      return;
+    }
+
+    if (room.restartRequest.byClientId === clientId) {
+      reply?.({ ok: false, error: "需要对手同意重开。" });
+      return;
+    }
+
+    const player = room.players.find((item) => item.clientId === clientId);
+
+    if (!player) {
+      reply?.({ ok: false, error: "没有找到玩家。" });
+      return;
+    }
+
+    if (accepted) {
+      resetRoom(room);
+      refreshRoomStatus(room);
+      setRoomEvent(room, `${player.name} 同意重开，对局已重开，请双方重新准备。`, "info");
+    } else {
+      room.restartRequest = null;
+      setRoomEvent(room, `${player.name} 拒绝重开，继续游戏。`, "warning");
+    }
+
     broadcastRoom(room);
     reply?.({ ok: true });
   });
@@ -507,6 +579,7 @@ io.on("connection", (socket) => {
       byColor: room.players.find((player) => player.clientId === clientId)?.color ?? "black",
       moveNumber: lastMove.moveNumber
     };
+    room.restartRequest = null;
 
     broadcastRoom(room);
     reply?.({ ok: true });
@@ -553,6 +626,7 @@ io.on("connection", (socket) => {
       player.socketId = null;
       room.colorSwapRequest = null;
       room.rematchRequest = null;
+      room.restartRequest = null;
       setRoomEvent(room, `${player.name} 已离线，对局暂停。`, "warning");
     } else {
       const spectator = room.spectators.get(socket.data.clientId);
@@ -606,6 +680,7 @@ function createRoom(): Room {
     undoRequest: null,
     colorSwapRequest: null,
     rematchRequest: null,
+    restartRequest: null,
     lastEvent: null,
     eventCounter: 0
   };
@@ -713,6 +788,7 @@ function resetRoom(room: Room): void {
   room.undoRequest = null;
   room.colorSwapRequest = null;
   room.rematchRequest = null;
+  room.restartRequest = null;
   setAllPlayersUnready(room);
 }
 
@@ -726,6 +802,7 @@ function startRematch(room: Room): void {
   room.undoRequest = null;
   room.colorSwapRequest = null;
   room.rematchRequest = null;
+  room.restartRequest = null;
   room.players.forEach((player) => {
     player.ready = true;
   });
@@ -735,6 +812,14 @@ function startRematch(room: Room): void {
 function canHandleRematch(room: Room): boolean {
   return (
     (room.status === "won" || room.status === "draw") &&
+    room.players.length === 2 &&
+    room.players.every((player) => player.online)
+  );
+}
+
+function canRequestRestart(room: Room): boolean {
+  return (
+    room.status === "playing" &&
     room.players.length === 2 &&
     room.players.every((player) => player.online)
   );
@@ -754,6 +839,7 @@ function undoLastMove(room: Room): void {
   room.winningLine = [];
   room.status = "playing";
   room.undoRequest = null;
+  room.restartRequest = null;
 }
 
 function setAllPlayersUnready(room: Room): void {
@@ -794,6 +880,7 @@ function serializeRoom(room: Room): RoomState {
     undoRequest: room.undoRequest,
     colorSwapRequest: room.colorSwapRequest,
     rematchRequest: room.rematchRequest,
+    restartRequest: room.restartRequest,
     lastEvent: room.lastEvent,
     message: getRoomMessage(room)
   };
