@@ -153,7 +153,7 @@ class GomokuAudio {
       this.scheduleCalmBar(startAt);
     }
 
-    this.musicTimer = window.setTimeout(() => this.scheduleMusicBar(), this.track === "joy" ? 3840 : 3600);
+    this.musicTimer = window.setTimeout(() => this.scheduleMusicBar(), this.track === "joy" ? 4800 : 3600);
   }
 
   private scheduleCalmBar(startAt: number): void {
@@ -174,37 +174,41 @@ class GomokuAudio {
       587.33,
       739.99,
       880,
+      null,
       987.77,
       880,
       739.99,
-      659.25,
+      null,
       587.33,
       659.25,
       739.99,
+      null,
       880,
       739.99,
       659.25,
-      587.33,
-      493.88,
-      587.33
+      null
     ];
-    const step = 0.24;
+    const step = 0.3;
 
     for (let i = 0; i < melody.length; i += 1) {
       const frequency = melody[(this.melodyIndex + i) % melody.length];
+      if (!frequency) {
+        continue;
+      }
+
       const time = startAt + i * step;
       const accent = i % 4 === 0 ? 0.038 : 0.026;
-      this.playPluckTone(frequency, time, 0.18, "square", accent);
-      this.playPluckTone(frequency * 2, time + 0.018, 0.12, "triangle", accent * 0.42);
+      this.playPluckTone(frequency, time, 0.22, "square", accent);
+      this.playPluckTone(frequency * 2, time + 0.022, 0.15, "triangle", accent * 0.4);
     }
 
     for (let beat = 0; beat < 4; beat += 1) {
-      const time = startAt + beat * 0.96;
-      this.playPluckTone(146.83, time, 0.34, "triangle", 0.04);
-      this.playPluckTone(220, time + 0.48, 0.2, "triangle", 0.026);
+      const time = startAt + beat * 1.2;
+      this.playPluckTone(146.83, time, 0.38, "triangle", 0.038);
+      this.playPluckTone(220, time + 0.6, 0.24, "triangle", 0.022);
       this.playJoyChord(time + 0.03);
-      this.playMusicClick(time + 0.46, 0.028);
-      this.playMusicClick(time + 0.72, 0.016);
+      this.playMusicClick(time + 0.58, 0.022);
+      this.playMusicClick(time + 0.9, 0.012);
     }
 
     this.melodyIndex = (this.melodyIndex + 5) % melody.length;
