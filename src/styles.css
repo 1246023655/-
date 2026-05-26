@@ -647,10 +647,6 @@ label {
     grid-row: auto;
   }
 
-  .shell.is-playing .board-wrap {
-    order: -1;
-  }
-
   .room-tools {
     grid-template-columns: 1fr 1fr;
   }
