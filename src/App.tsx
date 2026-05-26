@@ -86,6 +86,7 @@ export default function App() {
   const [connected, setConnected] = useState(socket.connected);
   const [copied, setCopied] = useState(false);
   const [musicEnabled, setMusicEnabled] = useState(() => gomokuAudio.isEnabled());
+  const [musicTrackLabel, setMusicTrackLabel] = useState(() => gomokuAudio.getTrackLabel());
   const lastRoomEventIdRef = useRef(0);
   const boardSectionRef = useRef<HTMLElement | null>(null);
   const prepareCardRef = useRef<HTMLDivElement | null>(null);
@@ -288,9 +289,7 @@ export default function App() {
           return;
         }
 
-        setState(ack.state);
-        setRoomInput(ack.roomId);
-        window.history.replaceState(null, "", `?room=${ack.roomId}`);
+        handleCreatedRoom(ack.roomId, ack.state);
       }
     );
   }
@@ -434,10 +433,24 @@ export default function App() {
     }
   }
 
+  function handleCreatedRoom(roomId: string, nextState: RoomState) {
+    setState(nextState);
+    setRoomInput(roomId);
+    window.history.replaceState(null, "", `?room=${roomId}`);
+    window.setTimeout(() => {
+      prepareCardRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 80);
+  }
+
   function toggleMusic() {
     const nextEnabled = !musicEnabled;
     setMusicEnabled(nextEnabled);
     gomokuAudio.setEnabled(nextEnabled);
+  }
+
+  function switchMusicTrack() {
+    void gomokuAudio.unlock().catch(() => undefined);
+    setMusicTrackLabel(gomokuAudio.switchTrack());
   }
 
   async function copyShareUrl() {
@@ -463,9 +476,14 @@ export default function App() {
             <h1>五子棋</h1>
             <p>{isOnlineMode ? (connected ? "联机已连接" : "联机连接中") : "本地对局"}</p>
           </div>
-          <button type="button" className="audio-toggle" onClick={toggleMusic}>
-            {musicEnabled ? "音乐开" : "音乐关"}
-          </button>
+          <div className="audio-actions" aria-label="音乐控制">
+            <button type="button" className="audio-toggle" onClick={toggleMusic}>
+              {musicEnabled ? "音乐开" : "音乐关"}
+            </button>
+            <button type="button" className="audio-toggle" onClick={switchMusicTrack}>
+              切换{musicTrackLabel}
+            </button>
+          </div>
         </div>
 
         <div className="room-tools">

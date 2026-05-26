@@ -147,7 +147,6 @@ input:focus {
 
 .audio-toggle {
   min-height: 34px;
-  margin-left: auto;
   padding: 0 12px;
   border: 1px solid rgb(255 232 211 / 48%);
   color: #fff8eb;
@@ -158,6 +157,14 @@ input:focus {
 
 .audio-toggle:hover:not(:disabled) {
   background: rgb(36 26 20 / 62%);
+}
+
+.audio-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-left: auto;
+  justify-content: flex-end;
 }
 
 .brand-mark {

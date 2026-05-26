@@ -1,4 +1,8 @@
 const MUSIC_ENABLED_KEY = "gomoku.musicEnabled";
+const MUSIC_TRACK_KEY = "gomoku.musicTrack";
+const MUSIC_TRACKS = ["calm", "joy"] as const;
+
+type MusicTrack = (typeof MUSIC_TRACKS)[number];
 
 const AudioContextCtor =
   window.AudioContext ??
@@ -12,9 +16,14 @@ class GomokuAudio {
   private musicTimer: number | null = null;
   private melodyIndex = 0;
   private enabled = localStorage.getItem(MUSIC_ENABLED_KEY) !== "off";
+  private track: MusicTrack = readTrack();
 
   isEnabled(): boolean {
     return this.enabled;
+  }
+
+  getTrackLabel(): string {
+    return this.track === "calm" ? "清雅" : "欢快";
   }
 
   setEnabled(enabled: boolean): void {
@@ -27,6 +36,19 @@ class GomokuAudio {
     }
 
     this.stopMusic();
+  }
+
+  switchTrack(): string {
+    this.track = this.track === "calm" ? "joy" : "calm";
+    this.melodyIndex = 0;
+    localStorage.setItem(MUSIC_TRACK_KEY, this.track);
+
+    if (this.enabled && this.context) {
+      this.stopMusic();
+      void this.startMusic();
+    }
+
+    return this.getTrackLabel();
   }
 
   async unlock(): Promise<void> {
@@ -125,18 +147,46 @@ class GomokuAudio {
 
     const context = this.context;
     const startAt = context.currentTime + 0.04;
+    if (this.track === "joy") {
+      this.scheduleJoyBar(startAt);
+    } else {
+      this.scheduleCalmBar(startAt);
+    }
+
+    this.musicTimer = window.setTimeout(() => this.scheduleMusicBar(), this.track === "joy" ? 2400 : 3600);
+  }
+
+  private scheduleCalmBar(startAt: number): void {
     const scale = [261.63, 293.66, 329.63, 392, 440, 523.25];
     const pattern = [0, 2, 4, 3, 1, 2, 5, 4];
 
     this.playSoftTone(130.81, startAt, 3.6, "sine", 0.026);
-
     for (let i = 0; i < 4; i += 1) {
       const noteIndex = pattern[(this.melodyIndex + i) % pattern.length];
       this.playSoftTone(scale[noteIndex], startAt + i * 0.92, 0.7, "triangle", 0.034);
     }
 
     this.melodyIndex = (this.melodyIndex + 2) % pattern.length;
-    this.musicTimer = window.setTimeout(() => this.scheduleMusicBar(), 3600);
+  }
+
+  private scheduleJoyBar(startAt: number): void {
+    const scale = [293.66, 329.63, 392, 440, 493.88, 587.33, 659.25];
+    const pattern = [0, 2, 4, 5, 4, 2, 1, 3, 5, 6, 5, 3];
+
+    this.playSoftTone(146.83, startAt, 1.1, "triangle", 0.032);
+    this.playSoftTone(196, startAt + 1.2, 1.05, "triangle", 0.026);
+
+    for (let i = 0; i < 6; i += 1) {
+      const noteIndex = pattern[(this.melodyIndex + i) % pattern.length];
+      this.playSoftTone(scale[noteIndex], startAt + i * 0.36, 0.26, "square", 0.022);
+      this.playSoftTone(scale[noteIndex] * 2, startAt + i * 0.36 + 0.02, 0.18, "triangle", 0.014);
+    }
+
+    for (let i = 0; i < 4; i += 1) {
+      this.playSoftTone(784, startAt + i * 0.6 + 0.28, 0.08, "sine", 0.012);
+    }
+
+    this.melodyIndex = (this.melodyIndex + 3) % pattern.length;
   }
 
   private playSoftTone(
@@ -161,6 +211,11 @@ class GomokuAudio {
     oscillator.start(startAt);
     oscillator.stop(startAt + duration + 0.05);
   }
+}
+
+function readTrack(): MusicTrack {
+  const saved = localStorage.getItem(MUSIC_TRACK_KEY);
+  return MUSIC_TRACKS.includes(saved as MusicTrack) ? (saved as MusicTrack) : "calm";
 }
 
 export const gomokuAudio = new GomokuAudio();
