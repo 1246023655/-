@@ -87,6 +87,7 @@ export default function App() {
   const [copied, setCopied] = useState(false);
   const [musicEnabled, setMusicEnabled] = useState(() => gomokuAudio.isEnabled());
   const [musicTrackLabel, setMusicTrackLabel] = useState(() => gomokuAudio.getTrackLabel());
+  const [dismissedGameOverKey, setDismissedGameOverKey] = useState("");
   const lastRoomEventIdRef = useRef(0);
   const boardSectionRef = useRef<HTMLElement | null>(null);
   const prepareCardRef = useRef<HTMLDivElement | null>(null);
@@ -135,10 +136,37 @@ export default function App() {
   const colorSwapRequestForMe =
     state?.colorSwapRequest?.toClientId === clientId ? state.colorSwapRequest : null;
   const colorSwapRequestedByMe = state?.colorSwapRequest?.fromClientId === clientId;
+  const gameOverKey = getGameOverKey(state);
+  const rematchRequestForMe =
+    state?.rematchRequest && state.rematchRequest.byClientId !== clientId
+      ? state.rematchRequest
+      : null;
+  const rematchRequestedByMe = state?.rematchRequest?.byClientId === clientId;
+  const shouldShowGameOverDialog =
+    isOnlineMode &&
+    Boolean(
+      state &&
+        myPlayer &&
+        gameOverKey &&
+        !state.rematchRequest &&
+        dismissedGameOverKey !== gameOverKey
+    );
+  const shouldShowRematchInvite =
+    isOnlineMode &&
+    Boolean(state && myPlayer && gameOverKey && rematchRequestForMe);
+  const shouldShowRematchWaiting =
+    isOnlineMode &&
+    Boolean(state && myPlayer && gameOverKey && rematchRequestedByMe);
 
   useEffect(() => {
     localStorage.setItem(PLAYER_NAME_KEY, playerName);
   }, [playerName]);
+
+  useEffect(() => {
+    if (state?.status === "playing") {
+      setDismissedGameOverKey("");
+    }
+  }, [state?.status, state?.moveHistory.length]);
 
   useEffect(() => {
     void gomokuAudio.startMusic().catch(() => undefined);
@@ -400,6 +428,42 @@ export default function App() {
 
   function respondColorSwap(accepted: boolean) {
     socket.emit("color-swap:respond", accepted, (ack: Ack) => {
+      if (!ack.ok) {
+        setNotice(ack.error);
+      }
+    });
+  }
+
+  function requestRematch() {
+    if (gameOverKey) {
+      setDismissedGameOverKey(gameOverKey);
+    }
+
+    socket.emit("game:rematch:request", (ack: Ack) => {
+      if (!ack.ok) {
+        setNotice(ack.error);
+      }
+    });
+  }
+
+  function respondRematch(accepted: boolean) {
+    if (!accepted && gameOverKey) {
+      setDismissedGameOverKey(gameOverKey);
+    }
+
+    socket.emit("game:rematch:respond", accepted, (ack: Ack) => {
+      if (!ack.ok) {
+        setNotice(ack.error);
+      }
+    });
+  }
+
+  function declineRematch() {
+    if (gameOverKey) {
+      setDismissedGameOverKey(gameOverKey);
+    }
+
+    socket.emit("game:rematch:cancel", (ack: Ack) => {
       if (!ack.ok) {
         setNotice(ack.error);
       }
@@ -785,8 +849,75 @@ export default function App() {
           </div>
         </section>
       </section>
+
+      {shouldShowGameOverDialog && state && myPlayer && (
+        <div className="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="game-over-title">
+          <div className="match-dialog">
+            <span className="eyebrow">本局结束</span>
+            <h2 id="game-over-title">{getGameOverTitle(state, myPlayer.color)}</h2>
+            <p>要不要和对方再来一局？双方都同意后会立刻重新开局。</p>
+            <div className="dialog-actions">
+              <button type="button" onClick={requestRematch}>
+                再来一局
+              </button>
+              <button type="button" className="secondary" onClick={declineRematch}>
+                不玩了
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {shouldShowRematchInvite && rematchRequestForMe && (
+        <div className="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="rematch-title">
+          <div className="match-dialog">
+            <span className="eyebrow">再来一局</span>
+            <h2 id="rematch-title">{rematchRequestForMe.byName} 邀请你再来一局</h2>
+            <p>接受后会立刻重开，黑棋先手，并显示“游戏开始”。</p>
+            <div className="dialog-actions">
+              <button type="button" onClick={() => respondRematch(true)}>
+                来战来战
+              </button>
+              <button type="button" className="secondary" onClick={() => respondRematch(false)}>
+                怕了怕了
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {shouldShowRematchWaiting && (
+        <div className="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="rematch-waiting-title">
+          <div className="match-dialog">
+            <span className="eyebrow">等待回应</span>
+            <h2 id="rematch-waiting-title">已邀请对方再来一局</h2>
+            <p>对方点“来战来战”后会自动开始下一局。</p>
+            <div className="dialog-actions is-single">
+              <button type="button" className="secondary" onClick={declineRematch}>
+                不玩了
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
+}
+
+function getGameOverKey(state: RoomState | null): string {
+  if (!state || (state.status !== "won" && state.status !== "draw")) {
+    return "";
+  }
+
+  return `${state.roomId}:${state.status}:${state.winner ?? "draw"}:${state.moveHistory.length}`;
+}
+
+function getGameOverTitle(state: RoomState, myColor: Stone): string {
+  if (state.status === "draw") {
+    return "平局了，再战一盘！";
+  }
+
+  return state.winner === myColor ? "恭喜你，你赢了！" : "可惜了，再接再厉！";
 }
 
 function PlayerRow({

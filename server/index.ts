@@ -20,6 +20,7 @@ import {
   type Move,
   type MovePayload,
   type PlayerInfo,
+  type RematchRequest,
   type RoomEvent,
   type RoomState,
   type Stone,
@@ -49,6 +50,7 @@ type Room = {
   status: GameStatus;
   undoRequest: UndoRequest | null;
   colorSwapRequest: ColorSwapRequest | null;
+  rematchRequest: RematchRequest | null;
   lastEvent: RoomEvent | null;
   eventCounter: number;
 };
@@ -180,9 +182,13 @@ io.on("connection", (socket) => {
       room.winner = player.color;
       room.winningLine = winningLine;
       room.status = "won";
+      room.rematchRequest = null;
+      setAllPlayersUnready(room);
       setRoomEvent(room, `${player.name} 连成五子，${player.color === "black" ? "黑棋" : "白棋"}获胜。`, "success");
     } else if (isBoardFull(room.board)) {
       room.status = "draw";
+      room.rematchRequest = null;
+      setAllPlayersUnready(room);
       setRoomEvent(room, "棋盘已满，本局平局。", "info");
     } else {
       room.turn = nextTurn(room.turn);
@@ -357,6 +363,114 @@ io.on("connection", (socket) => {
     reply?.({ ok: true });
   });
 
+  socket.on("game:rematch:request", (reply?: (ack: Ack) => void) => {
+    const room = getSocketRoom(socket);
+    const clientId = socket.data.clientId;
+
+    if (!room || !clientId || !isSocketPlayer(room, socket)) {
+      reply?.({ ok: false, error: "只有玩家可以邀请再来一局。" });
+      return;
+    }
+
+    if (!canHandleRematch(room)) {
+      reply?.({ ok: false, error: "当前还不能邀请再来一局。" });
+      return;
+    }
+
+    const player = room.players.find((item) => item.clientId === clientId);
+
+    if (!player) {
+      reply?.({ ok: false, error: "没有找到玩家。" });
+      return;
+    }
+
+    if (room.rematchRequest) {
+      if (room.rematchRequest.byClientId === clientId) {
+        reply?.({ ok: true });
+        return;
+      }
+
+      startRematch(room);
+      broadcastRoom(room);
+      reply?.({ ok: true });
+      return;
+    }
+
+    player.ready = true;
+    room.rematchRequest = {
+      byClientId: player.clientId,
+      byName: player.name
+    };
+    setRoomEvent(room, `${player.name} 邀请再来一局。`, "warning", "rematch-request");
+    broadcastRoom(room);
+    reply?.({ ok: true });
+  });
+
+  socket.on("game:rematch:respond", (accepted: boolean, reply?: (ack: Ack) => void) => {
+    const room = getSocketRoom(socket);
+    const clientId = socket.data.clientId;
+
+    if (!room || !clientId || !isSocketPlayer(room, socket) || !room.rematchRequest) {
+      reply?.({ ok: false, error: "没有可处理的再来一局邀请。" });
+      return;
+    }
+
+    if (!canHandleRematch(room)) {
+      reply?.({ ok: false, error: "当前还不能处理再来一局。" });
+      return;
+    }
+
+    if (room.rematchRequest.byClientId === clientId) {
+      reply?.({ ok: false, error: "需要对手同意再来一局。" });
+      return;
+    }
+
+    const player = room.players.find((item) => item.clientId === clientId);
+
+    if (!player) {
+      reply?.({ ok: false, error: "没有找到玩家。" });
+      return;
+    }
+
+    if (accepted) {
+      startRematch(room);
+    } else {
+      setAllPlayersUnready(room);
+      room.rematchRequest = null;
+      setRoomEvent(room, `${player.name} 拒绝了再来一局。`, "warning");
+    }
+
+    broadcastRoom(room);
+    reply?.({ ok: true });
+  });
+
+  socket.on("game:rematch:cancel", (reply?: (ack: Ack) => void) => {
+    const room = getSocketRoom(socket);
+    const clientId = socket.data.clientId;
+
+    if (!room || !clientId || !isSocketPlayer(room, socket)) {
+      reply?.({ ok: false, error: "只有玩家可以取消再来一局。" });
+      return;
+    }
+
+    const player = room.players.find((item) => item.clientId === clientId);
+
+    if (!player) {
+      reply?.({ ok: false, error: "没有找到玩家。" });
+      return;
+    }
+
+    player.ready = false;
+
+    if (room.rematchRequest?.byClientId === clientId) {
+      room.rematchRequest = null;
+      setRoomEvent(room, `${player.name} 取消了再来一局。`, "info");
+      broadcastRoom(room);
+    }
+
+    reply?.({ ok: true });
+  });
+
   socket.on("game:restart", (reply?: (ack: Ack) => void) => {
     const room = getSocketRoom(socket);
 
@@ -438,6 +552,7 @@ io.on("connection", (socket) => {
       player.ready = false;
       player.socketId = null;
       room.colorSwapRequest = null;
+      room.rematchRequest = null;
       setRoomEvent(room, `${player.name} 已离线，对局暂停。`, "warning");
     } else {
       const spectator = room.spectators.get(socket.data.clientId);
@@ -490,6 +605,7 @@ function createRoom(): Room {
     status: "waiting",
     undoRequest: null,
     colorSwapRequest: null,
+    rematchRequest: null,
     lastEvent: null,
     eventCounter: 0
   };
@@ -596,7 +712,32 @@ function resetRoom(room: Room): void {
   room.status = "waiting";
   room.undoRequest = null;
   room.colorSwapRequest = null;
+  room.rematchRequest = null;
   setAllPlayersUnready(room);
+}
+
+function startRematch(room: Room): void {
+  room.board = createEmptyBoard();
+  room.turn = "black";
+  room.winner = null;
+  room.winningLine = [];
+  room.moveHistory = [];
+  room.status = "playing";
+  room.undoRequest = null;
+  room.colorSwapRequest = null;
+  room.rematchRequest = null;
+  room.players.forEach((player) => {
+    player.ready = true;
+  });
+  setRoomEvent(room, "游戏开始", "success", "game-start");
+}
+
+function canHandleRematch(room: Room): boolean {
+  return (
+    (room.status === "won" || room.status === "draw") &&
+    room.players.length === 2 &&
+    room.players.every((player) => player.online)
+  );
 }
 
 function undoLastMove(room: Room): void {
@@ -652,6 +793,7 @@ function serializeRoom(room: Room): RoomState {
     status: room.status,
     undoRequest: room.undoRequest,
     colorSwapRequest: room.colorSwapRequest,
+    rematchRequest: room.rematchRequest,
     lastEvent: room.lastEvent,
     message: getRoomMessage(room)
   };

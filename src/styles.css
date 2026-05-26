@@ -605,6 +605,53 @@ label {
   gap: 6px;
 }
 
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  background: rgb(20 18 32 / 46%);
+  backdrop-filter: blur(5px);
+}
+
+.match-dialog {
+  display: grid;
+  gap: 14px;
+  width: min(380px, 100%);
+  padding: 20px;
+  border: 1px solid rgb(255 232 211 / 72%);
+  border-radius: 8px;
+  color: var(--ink);
+  background: linear-gradient(180deg, rgb(255 250 240 / 96%), rgb(245 224 192 / 94%));
+  box-shadow:
+    0 26px 70px rgb(20 18 32 / 36%),
+    inset 0 0 0 1px rgb(255 255 255 / 62%);
+}
+
+.match-dialog h2 {
+  margin: 0;
+  font-size: 23px;
+  line-height: 1.25;
+  letter-spacing: 0;
+}
+
+.match-dialog p {
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.dialog-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.dialog-actions.is-single {
+  grid-template-columns: 1fr;
+}
+
 .mode-tabs {
   grid-template-columns: repeat(3, 1fr);
 }

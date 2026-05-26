@@ -34,7 +34,7 @@ export type RoomEvent = {
   id: number;
   message: string;
   type: "info" | "success" | "warning";
-  code?: "game-start" | "swap-request";
+  code?: "game-start" | "swap-request" | "rematch-request";
 };
 
 export type ColorSwapRequest = {
@@ -43,6 +43,11 @@ export type ColorSwapRequest = {
   toClientId: string;
   requestedColor: Stone;
   fromName: string;
+};
+
+export type RematchRequest = {
+  byClientId: string;
+  byName: string;
 };
 
 export type GameStatus =
@@ -64,6 +69,7 @@ export type RoomState = {
   status: GameStatus;
   undoRequest: UndoRequest | null;
   colorSwapRequest: ColorSwapRequest | null;
+  rematchRequest: RematchRequest | null;
   lastEvent: RoomEvent | null;
   message: string;
 };
