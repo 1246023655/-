@@ -28,7 +28,8 @@ const STAR_POINTS: Position[] = [
   { row: 11, col: 11 }
 ];
 type GameMode = "online" | "local" | "ai";
-type AiLevel = "one" | "two";
+const AI_LEVELS = [1, 2, 3, 4, 5, 6, 7, 8, 9] as const;
+type AiLevel = (typeof AI_LEVELS)[number];
 
 type LocalMove = Position & {
   color: Stone;
@@ -61,7 +62,7 @@ function getInitialName(): string {
   return localStorage.getItem(PLAYER_NAME_KEY) || `棋手${Math.floor(Math.random() * 90 + 10)}`;
 }
 
-function createLocalGame(mode: GameMode, aiLevel: AiLevel = "one"): LocalGame {
+function createLocalGame(mode: GameMode, aiLevel: AiLevel = 1): LocalGame {
   return {
     board: createEmptyBoard(),
     turn: "black",
@@ -80,7 +81,7 @@ export default function App() {
   const [state, setState] = useState<RoomState | null>(null);
   const [mode, setMode] = useState<GameMode>(() => (getRoomFromUrl() ? "online" : "local"));
   const [localGame, setLocalGame] = useState<LocalGame>(() => createLocalGame(getRoomFromUrl() ? "online" : "local"));
-  const [aiLevel, setAiLevel] = useState<AiLevel>("one");
+  const [aiLevel, setAiLevel] = useState<AiLevel>(1);
   const [notice, setNotice] = useState("");
   const [eventNotice, setEventNotice] = useState("");
   const [connected, setConnected] = useState(socket.connected);
@@ -589,20 +590,16 @@ export default function App() {
           </div>
           {mode === "ai" && (
             <div className="ai-tabs" aria-label="人机难度">
-              <button
-                type="button"
-                className={aiLevel === "one" ? "is-selected" : "secondary"}
-                onClick={() => changeAiLevel("one")}
-              >
-                一段
-              </button>
-              <button
-                type="button"
-                className={aiLevel === "two" ? "is-selected" : "secondary"}
-                onClick={() => changeAiLevel("two")}
-              >
-                二段
-              </button>
+              {AI_LEVELS.map((level) => (
+                <button
+                  type="button"
+                  key={level}
+                  className={aiLevel === level ? "is-selected" : "secondary"}
+                  onClick={() => changeAiLevel(level)}
+                >
+                  {aiLevelLabel(level)}
+                </button>
+              ))}
             </div>
           )}
           <label>
@@ -1076,45 +1073,83 @@ function chooseAiMove(board: LocalGame["board"], level: AiLevel): Position | nul
     return null;
   }
 
-  if (level === "two") {
-    return chooseMediumAiMove(board, available);
+  const winningMove = findTacticalMove(board, available, "white");
+
+  if (winningMove) {
+    return winningMove;
   }
 
-  return (
-    findTacticalMove(board, available, "white") ??
-    findTacticalMove(board, available, "black") ??
-    getCenterMove(board) ??
-    available[Math.floor(Math.random() * available.length)]
-  );
+  const blockingMove = findTacticalMove(board, available, "black");
+
+  if (blockingMove && (level >= 2 || Math.random() < 0.68)) {
+    return blockingMove;
+  }
+
+  return chooseRankedAiMove(board, available, level);
 }
 
-function chooseMediumAiMove(board: LocalGame["board"], available: Position[]): Position {
-  const immediateMove =
-    findTacticalMove(board, available, "white") ?? findTacticalMove(board, available, "black");
-
-  if (immediateMove) {
-    return immediateMove;
-  }
-
-  let bestScore = -Infinity;
-  let bestMoves: Position[] = [];
+function chooseRankedAiMove(
+  board: LocalGame["board"],
+  available: Position[],
+  level: AiLevel
+): Position {
+  const profile = getAiProfile(level);
+  const scoredMoves: Array<{ move: Position; score: number }> = [];
 
   for (const move of available) {
-    const score =
-      evaluateCandidate(board, move, "white") * 1.1 +
-      evaluateCandidate(board, move, "black") * 0.95 +
-      centerBias(move) +
-      neighborBias(board, move);
+    let score =
+      evaluateCandidate(board, move, "white") * profile.attack +
+      evaluateCandidate(board, move, "black") * profile.defense +
+      centerBias(move) * profile.center +
+      neighborBias(board, move) * profile.neighbor +
+      Math.random() * profile.randomness;
 
-    if (score > bestScore) {
-      bestScore = score;
-      bestMoves = [move];
-    } else if (score === bestScore) {
-      bestMoves.push(move);
+    if (profile.dangerPenalty && allowsOpponentImmediateWin(board, move)) {
+      score -= profile.dangerPenalty;
     }
+
+    scoredMoves.push({ move, score });
   }
 
-  return bestMoves[Math.floor(Math.random() * bestMoves.length)];
+  scoredMoves.sort((left, right) => right.score - left.score);
+
+  if (level <= 2 && getCenterMove(board) && Math.random() < 0.22) {
+    return getCenterMove(board) ?? scoredMoves[0].move;
+  }
+
+  const pickFrom = scoredMoves.slice(0, profile.pickFrom);
+
+  return pickFrom[Math.floor(Math.random() * pickFrom.length)]?.move ?? scoredMoves[0].move;
+}
+
+type AiProfile = {
+  attack: number;
+  defense: number;
+  center: number;
+  neighbor: number;
+  randomness: number;
+  pickFrom: number;
+  dangerPenalty: number;
+};
+
+function getAiProfile(level: AiLevel): AiProfile {
+  return {
+    attack: 0.86 + level * 0.13,
+    defense: 0.55 + level * 0.15,
+    center: Math.max(0.42, 1.32 - level * 0.08),
+    neighbor: 0.82 + level * 0.1,
+    randomness: Math.max(0, 76 - level * 8),
+    pickFrom: Math.max(1, 9 - level),
+    dangerPenalty: level >= 5 ? 76000 + level * 12000 : level >= 3 ? 26000 : 0
+  };
+}
+
+function allowsOpponentImmediateWin(board: LocalGame["board"], move: Position): boolean {
+  const nextBoard = board.map((row) => [...row]);
+  nextBoard[move.row][move.col] = "white";
+  const nextAvailable = getAvailablePositions(nextBoard);
+
+  return Boolean(findTacticalMove(nextBoard, nextAvailable, "black"));
 }
 
 function evaluateCandidate(board: LocalGame["board"], move: Position, color: Stone): number {
@@ -1241,7 +1276,7 @@ function getLocalMessage(mode: GameMode, turn: Stone): string {
 }
 
 function aiLevelLabel(level: AiLevel): string {
-  return level === "one" ? "一段" : "二段";
+  return ["", "一段", "二段", "三段", "四段", "五段", "六段", "七段", "八段", "九段"][level];
 }
 
 function boardPointStyle(row: number, col: number): React.CSSProperties {
